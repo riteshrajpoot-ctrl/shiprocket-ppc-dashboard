@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     dailyUrl.searchParams.set('limit', '90')
     dailyUrl.searchParams.set('access_token', META_ACCESS_TOKEN)
 
-    const branchBody = {
+    const branchInstallBody = {
       branch_key: BRANCH_KEY,
       branch_secret: BRANCH_SECRET,
       start_date: dateStart,
@@ -48,16 +48,26 @@ export async function GET(request: Request) {
       filters: { 'last_attributed_touch_data_tilde_channel': ['Facebook Ads'] },
       aggregation: 'unique_count',
       granularity: 'all',
-      events: ['INSTALL', 'FIRST_ORDER_CREATED_FE']
+      events: ['INSTALL']
     }
 
-    const [campaignRes, dailyRes, branchRes] = await Promise.all([
+    const branchOrderBody = {
+      ...branchInstallBody,
+      events: ['FIRST_ORDER_CREATED_FE']
+    }
+
+    const [campaignRes, dailyRes, branchInstallRes, branchOrderRes] = await Promise.all([
       fetch(campaignUrl.toString()),
       fetch(dailyUrl.toString()),
       fetch('https://api2.branch.io/v1/query/analytics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(branchBody)
+        body: JSON.stringify(branchInstallBody)
+      }).catch(() => null),
+      fetch('https://api2.branch.io/v1/query/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(branchOrderBody)
       }).catch(() => null)
     ])
 
@@ -70,16 +80,26 @@ export async function GET(request: Request) {
 
     // ── Parse Branch data ─────────────────────────────────────────────────────
     const branchMap: Record<string, { installs: number; firstOrders: number }> = {}
-    if (branchRes?.ok) {
-      const branchJson = await branchRes.json()
-      const branchResults: any[] = branchJson.results || []
-      for (const row of branchResults) {
+
+    if (branchInstallRes?.ok) {
+      const json = await branchInstallRes.json()
+      const results: any[] = json.results || []
+      for (const row of results) {
         const name = row.result?.last_attributed_touch_data_tilde_campaign
         if (!name) continue
         if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
-        const count = Number(row.result?.total_count || 0)
-        if (row.event === 'INSTALL') branchMap[name].installs = count
-        if (row.event === 'FIRST_ORDER_CREATED_FE') branchMap[name].firstOrders = count
+        branchMap[name].installs = Number(row.result?.total_count || 0)
+      }
+    }
+
+    if (branchOrderRes?.ok) {
+      const json = await branchOrderRes.json()
+      const results: any[] = json.results || []
+      for (const row of results) {
+        const name = row.result?.last_attributed_touch_data_tilde_campaign
+        if (!name) continue
+        if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
+        branchMap[name].firstOrders = Number(row.result?.total_count || 0)
       }
     }
 
