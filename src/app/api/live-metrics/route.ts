@@ -119,27 +119,27 @@ export async function GET(request: Request) {
     }
 
     // High CPI campaigns
-    campaigns.filter(c => c.cpi > CPI_TARGET && c.installs > 0).forEach(c => {
+    campaigns.filter((c: any) => c.cpi > CPI_TARGET && c.installs > 0).forEach((c: any) => {
       alerts.push({ severity: 'critical', msg: `${c.campaign_name} CPI ₹${Math.round(c.cpi)} — ${Math.round(c.cpi / CPI_TARGET)}x above ₹${CPI_TARGET} target`, time: 'Now', category: 'cpi' })
     })
 
     // High CPL
-    campaigns.filter(c => c.cpl > CPL_TARGET && c.leads > 0).forEach(c => {
+    campaigns.filter((c: any) => c.cpl > CPL_TARGET && c.leads > 0).forEach((c: any) => {
       alerts.push({ severity: 'critical', msg: `${c.campaign_name} CPL ₹${Math.round(c.cpl)} — above ₹${CPL_TARGET} target`, time: 'Now', category: 'cpl' })
     })
 
     // Low CTR
-    campaigns.filter(c => c.ctr < CTR_MIN && c.impressions > 10000 && !['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(c.objective)).forEach(c => {
+    campaigns.filter((c: any) => c.ctr < CTR_MIN && c.impressions > 10000 && !['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(c.objective)).forEach((c: any) => {
       alerts.push({ severity: 'warning', msg: `${c.campaign_name} CTR ${c.ctr.toFixed(2)}% — below ${CTR_MIN}% threshold`, time: 'Now', category: 'ctr' })
     })
 
     // High frequency
-    campaigns.filter(c => c.frequency > FREQUENCY_MAX).forEach(c => {
+    campaigns.filter((c: any) => c.frequency > FREQUENCY_MAX).forEach((c: any) => {
       alerts.push({ severity: 'warning', msg: `${c.campaign_name} frequency ${c.frequency.toFixed(1)} — consider creative refresh`, time: 'Now', category: 'frequency' })
     })
 
     // Zero installs on install campaigns
-    campaigns.filter(c => c.installs === 0 && ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective) && c.spend > 1000).forEach(c => {
+    campaigns.filter((c: any) => c.installs === 0 && ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective) && c.spend > 1000).forEach((c: any) => {
       alerts.push({ severity: 'critical', msg: `${c.campaign_name} — ₹${Math.round(c.spend / 1000)}K spent with 0 installs tracked`, time: 'Now', category: 'installs' })
     })
 
@@ -161,7 +161,7 @@ export async function GET(request: Request) {
     health += avgCtr >= 1.0 ? 15 : avgCtr >= 0.7 ? 12 : avgCtr >= 0.5 ? 9 : avgCtr >= 0.3 ? 6 : 3
 
     // Ad strength — based on number of active campaigns (0-15)
-    const activeCampaigns = campaigns.filter(c => c.spend > 500).length
+    const activeCampaigns = campaigns.filter((c: any) => c.spend > 500).length
     health += activeCampaigns >= 6 ? 15 : activeCampaigns >= 4 ? 12 : activeCampaigns >= 2 ? 9 : 6
 
     // Reach diversity — based on unique reach vs impressions (0-15)
@@ -170,7 +170,7 @@ export async function GET(request: Request) {
     health += reachRatio >= 0.6 ? 15 : reachRatio >= 0.4 ? 12 : reachRatio >= 0.25 ? 8 : 5
 
     // Wasted spend — campaigns with high CPI (0-15)
-    const wastedSpend = campaigns.filter(c => c.cpi > CPI_TARGET * 2 && c.installs > 0).reduce((a, c) => a + c.spend, 0)
+    const wastedSpend = campaigns.filter((c: any) => c.cpi > CPI_TARGET * 2 && c.installs > 0).reduce((a, c) => a + c.spend, 0)
     const wastedPct = totals.spend > 0 ? wastedSpend / totals.spend : 0
     health += wastedPct < 0.05 ? 15 : wastedPct < 0.15 ? 10 : wastedPct < 0.3 ? 5 : 2
 
@@ -188,12 +188,12 @@ export async function GET(request: Request) {
 
     // ── Budget optimizer ──────────────────────────────────────────────────────
     // Find best performer and worst performers
-    const installCampaigns = campaigns.filter(c => c.installs > 0 && ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective))
+    const installCampaigns = campaigns.filter((c: any) => c.installs > 0 && ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective))
     const sorted = [...installCampaigns].sort((a, b) => a.cpi - b.cpi)
     const best = sorted[0]
     const worst = sorted[sorted.length - 1]
 
-    const budgetSuggestions = installCampaigns.map(c => {
+    const budgetSuggestions = installCampaigns.map((c: any) => {
       const cpiRatio = best ? c.cpi / best.cpi : 1
       let action: 'scale' | 'maintain' | 'reduce' | 'pause'
       let suggestedChange = 0
