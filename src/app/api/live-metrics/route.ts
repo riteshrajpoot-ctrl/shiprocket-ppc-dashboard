@@ -141,7 +141,7 @@ export async function GET(request: Request) {
     })
 
     // ── Totals ────────────────────────────────────────────────────────────────
-    const totals = campaigns.reduce((acc: any, c: any) => ({
+    const totals: any = campaigns.reduce((acc: any, c: any) => ({
       spend: acc.spend + c.spend,
       installs: acc.installs + c.installs,
       leads: acc.leads + c.leads,
