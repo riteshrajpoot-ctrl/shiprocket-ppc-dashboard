@@ -165,12 +165,12 @@ export async function GET(request: Request) {
     health += activeCampaigns >= 6 ? 15 : activeCampaigns >= 4 ? 12 : activeCampaigns >= 2 ? 9 : 6
 
     // Reach diversity — based on unique reach vs impressions (0-15)
-    const totalReach = campaigns.reduce((a, c) => a + c.reach, 0)
+    const totalReach = campaigns.reduce((a: any, c: any) => a + c.reach, 0)
     const reachRatio = totals.impressions > 0 ? totalReach / totals.impressions : 0
     health += reachRatio >= 0.6 ? 15 : reachRatio >= 0.4 ? 12 : reachRatio >= 0.25 ? 8 : 5
 
     // Wasted spend — campaigns with high CPI (0-15)
-    const wastedSpend = campaigns.filter((c: any) => c.cpi > CPI_TARGET * 2 && c.installs > 0).reduce((a, c) => a + c.spend, 0)
+    const wastedSpend = campaigns.filter((c: any) => c.cpi > CPI_TARGET * 2 && c.installs > 0).reduce((a: any, c: any) => a + c.spend, 0)
     const wastedPct = totals.spend > 0 ? wastedSpend / totals.spend : 0
     health += wastedPct < 0.05 ? 15 : wastedPct < 0.15 ? 10 : wastedPct < 0.3 ? 5 : 2
 
