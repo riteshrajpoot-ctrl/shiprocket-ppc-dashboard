@@ -1,103 +1,103 @@
 import { NextResponse } from 'next/server'
 
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN!
+const META_ACCOUNT_ID = 'act_596746546417726'
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const dateStart = searchParams.get('date_start')
-    const dateEnd = searchParams.get('date_end')
+    const dateStart = searchParams.get('date_start') ||
+      new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+    const dateEnd = searchParams.get('date_end') ||
+      new Date().toISOString().split('T')[0]
 
-    if (!dateStart || !dateEnd) {
-      return NextResponse.json({ error: 'date_start and date_end required' }, { status: 400 })
-    }
+    // 1. Fetch campaign-level aggregates
+    const campaignUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
+    campaignUrl.searchParams.set('fields', 'campaign_name,campaign_id,spend,impressions,clicks,ctr,cpc,reach,actions,objective')
+    campaignUrl.searchParams.set('level', 'campaign')
+    campaignUrl.searchParams.set('time_range[since]', dateStart)
+    campaignUrl.searchParams.set('time_range[until]', dateEnd)
+    campaignUrl.searchParams.set('limit', '50')
+    campaignUrl.searchParams.set('access_token', META_ACCESS_TOKEN)
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'mcp-client-2025-04-04'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        mcp_servers: [
-          {
-            type: 'url',
-            url: 'https://n8n.shiprocket.in/mcp/56f418b4-4d12-4080-afde-d4392df3e491',
-            name: 'meta-ads'
-          }
-        ],
-        system: `You are a data extraction assistant. When asked for Meta Ads campaign data, fetch it and return ONLY a valid JSON object with no markdown, no explanation, no backticks.
+    const campaignRes = await fetch(campaignUrl.toString())
+    if (!campaignRes.ok) throw new Error(`Meta API error: ${campaignRes.status}`)
+    const campaignJson = await campaignRes.json()
+    const rawCampaigns = campaignJson.data || []
 
-The JSON must have this exact structure:
-{
-  "campaigns": [
-    {
-      "campaign_name": string,
-      "campaign_id": string,
-      "spend": number,
-      "installs": number,
-      "clicks": number,
-      "impressions": number,
-      "cpi": number,
-      "ctr": number,
-      "objective": string
-    }
-  ],
-  "daily": [
-    {
-      "date": string (YYYY-MM-DD),
-      "spend": number,
-      "installs": number,
-      "clicks": number,
-      "impressions": number,
-      "ctr": number,
-      "cpi": number
-    }
-  ],
-  "totals": {
-    "spend": number,
-    "installs": number,
-    "clicks": number,
-    "impressions": number,
-    "cpi": number,
-    "ctr": number
-  }
-}
+    // 2. Fetch daily aggregates (time_increment=1)
+    const dailyUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
+    dailyUrl.searchParams.set('fields', 'spend,impressions,clicks,ctr,actions')
+    dailyUrl.searchParams.set('level', 'account')
+    dailyUrl.searchParams.set('time_increment', '1')
+    dailyUrl.searchParams.set('time_range[since]', dateStart)
+    dailyUrl.searchParams.set('time_range[until]', dateEnd)
+    dailyUrl.searchParams.set('limit', '90')
+    dailyUrl.searchParams.set('access_token', META_ACCESS_TOKEN)
 
-For installs, use the omni_activate_app action value. For daily data, aggregate all campaigns per day. All numbers must be actual numbers not strings.`,
-        messages: [
-          {
-            role: 'user',
-            content: `Fetch the Meta Ads campaign performance report for Shiprocket Quick account from ${dateStart} to ${dateEnd}. Return the data as JSON only.`
-          }
-        ]
-      })
+    const dailyRes = await fetch(dailyUrl.toString())
+    const dailyJson = await dailyRes.json()
+    const rawDaily = dailyJson.data || []
+
+    // Transform campaigns
+    const campaigns = rawCampaigns.map((c: any) => {
+      const actions = c.actions || []
+      const installs = Number(actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ?? 0)
+      const leads = Number(actions.find((a: any) => a.action_type === 'onsite_conversion.lead')?.value ?? 0)
+      const spend = Number(c.spend)
+      const clicks = Number(c.clicks)
+      const impressions = Number(c.impressions)
+
+      return {
+        campaign_name: c.campaign_name.replace(/SR_Quick_|SR_QUICK_/gi, ''),
+        campaign_id: c.campaign_id,
+        objective: c.objective,
+        spend: Math.round(spend * 100) / 100,
+        installs,
+        leads,
+        clicks,
+        impressions,
+        cpi: installs > 0 ? Math.round(spend / installs * 10) / 10 : 0,
+        ctr: impressions > 0 ? Math.round(clicks / impressions * 10000) / 100 : 0
+      }
     })
 
-    if (!response.ok) {
-      const err = await response.text()
-      console.error('Claude API error:', err)
-      return NextResponse.json({ error: 'Claude API error' }, { status: 500 })
-    }
+    // Transform daily
+    const daily = rawDaily.map((d: any) => {
+      const actions = d.actions || []
+      const installs = Number(actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ?? 0)
+      const spend = Number(d.spend)
+      const clicks = Number(d.clicks)
+      const impressions = Number(d.impressions)
 
-    const data = await response.json()
+      return {
+        date: d.date_start,
+        spend: Math.round(spend * 100) / 100,
+        installs,
+        clicks,
+        impressions,
+        ctr: impressions > 0 ? Math.round(clicks / impressions * 10000) / 100 : 0,
+        cpi: installs > 0 ? Math.round(spend / installs * 10) / 10 : 0
+      }
+    })
 
-    // Extract text from Claude's response
-    const textBlock = data.content?.find((b: any) => b.type === 'text')
-    if (!textBlock) {
-      return NextResponse.json({ error: 'No response from Claude' }, { status: 500 })
-    }
+    // Totals
+    const totals = campaigns.reduce((acc: any, c: any) => ({
+      spend: acc.spend + c.spend,
+      installs: acc.installs + c.installs,
+      leads: acc.leads + c.leads,
+      clicks: acc.clicks + c.clicks,
+      impressions: acc.impressions + c.impressions,
+    }), { spend: 0, installs: 0, leads: 0, clicks: 0, impressions: 0 })
 
-    // Clean and parse JSON
-    const raw = textBlock.text.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(raw)
+    totals.cpi = totals.installs > 0 ? Math.round(totals.spend / totals.installs * 10) / 10 : 0
+    totals.ctr = totals.impressions > 0 ? Math.round(totals.clicks / totals.impressions * 10000) / 100 : 0
+    totals.cpl = totals.leads > 0 ? Math.round(totals.spend / totals.leads * 10) / 10 : 0
 
-    return NextResponse.json(parsed)
+    return NextResponse.json({ campaigns, daily, totals, source: 'live' })
 
   } catch (error: any) {
-    console.error('Live metrics error:', error)
+    console.error('Live metrics error:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
