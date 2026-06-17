@@ -19,10 +19,10 @@ export async function GET(request: Request) {
         campaign_id,
         account_id,
         SUM(spend) as spend,
-        SUM(installs) as installs,
+        SUM(installs::numeric as installs,
         SUM(clicks) as clicks,
         SUM(impressions) as impressions,
-        CASE WHEN SUM(installs) > 0 THEN ROUND(SUM(spend) / SUM(installs), 1) ELSE 0 END as cpi,
+        CASE WHEN SUM(installs::numeric) > 0 THEN ROUND(SUM(spend) / SUM(installs::numeric), 1) ELSE 0 END as cpi,
         CASE WHEN SUM(impressions) > 0 THEN ROUND(SUM(clicks)::numeric / SUM(impressions) * 100, 2) ELSE 0 END as ctr
       FROM metrics_daily
       WHERE date >= ${dateStart}::date
@@ -35,11 +35,11 @@ export async function GET(request: Request) {
       SELECT
         date,
         SUM(spend) as spend,
-        SUM(installs) as installs,
+        SUM(installs::numeric) as installs,
         SUM(clicks) as clicks,
         SUM(impressions) as impressions,
         CASE WHEN SUM(impressions) > 0 THEN ROUND(SUM(clicks)::numeric / SUM(impressions) * 100, 2) ELSE 0 END as ctr,
-        CASE WHEN SUM(installs) > 0 THEN ROUND(SUM(spend) / SUM(installs), 1) ELSE 0 END as cpi
+        CASE WHEN SUM(installs::numeric) > 0 THEN ROUND(SUM(spend) / SUM(installs::numeric), 1) ELSE 0 END as cpi
       FROM metrics_daily
       WHERE date >= ${dateStart}::date
         AND date <= ${dateEnd}::date
