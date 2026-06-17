@@ -13,20 +13,17 @@ export async function GET(request: Request) {
 
     const sql = neon(process.env.DATABASE_URL!)
 
-    // Campaign-level aggregates using actual column names
     const campaigns = await sql`
       SELECT
         campaign_name,
         campaign_id,
         account_id,
         SUM(spend) as spend,
-        SUM(ftrs) as installs,
+        SUM(installs) as installs,
         SUM(clicks) as clicks,
         SUM(impressions) as impressions,
-        SUM(fts) as fts,
-        CASE WHEN SUM(ftrs) > 0 THEN ROUND(SUM(spend) / SUM(ftrs), 1) ELSE 0 END as cpi,
-        CASE WHEN SUM(impressions) > 0 THEN ROUND(SUM(clicks)::numeric / SUM(impressions) * 100, 2) ELSE 0 END as ctr,
-        AVG(impression_share) as impression_share
+        CASE WHEN SUM(installs) > 0 THEN ROUND(SUM(spend) / SUM(installs), 1) ELSE 0 END as cpi,
+        CASE WHEN SUM(impressions) > 0 THEN ROUND(SUM(clicks)::numeric / SUM(impressions) * 100, 2) ELSE 0 END as ctr
       FROM metrics_daily
       WHERE date >= ${dateStart}::date
         AND date <= ${dateEnd}::date
@@ -34,17 +31,15 @@ export async function GET(request: Request) {
       ORDER BY spend DESC
     `
 
-    // Daily trend data
     const daily = await sql`
       SELECT
         date,
         SUM(spend) as spend,
-        SUM(ftrs) as installs,
+        SUM(installs) as installs,
         SUM(clicks) as clicks,
         SUM(impressions) as impressions,
-        SUM(fts) as fts,
         CASE WHEN SUM(impressions) > 0 THEN ROUND(SUM(clicks)::numeric / SUM(impressions) * 100, 2) ELSE 0 END as ctr,
-        CASE WHEN SUM(ftrs) > 0 THEN ROUND(SUM(spend) / SUM(ftrs), 1) ELSE 0 END as cpi
+        CASE WHEN SUM(installs) > 0 THEN ROUND(SUM(spend) / SUM(installs), 1) ELSE 0 END as cpi
       FROM metrics_daily
       WHERE date >= ${dateStart}::date
         AND date <= ${dateEnd}::date
