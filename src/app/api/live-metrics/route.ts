@@ -43,17 +43,17 @@ export async function GET(request: Request) {
       branch_secret: BRANCH_SECRET,
       start_date: dateStart,
       end_date: dateEnd,
-      data_source: 'eo_install',
+      data_source: 'eo_custom_event',
       dimensions: ['last_attributed_touch_data_tilde_campaign'],
-      filters: { 'last_attributed_touch_data_tilde_channel': ['Facebook Ads'] },
       aggregation: 'unique_count',
       granularity: 'all',
-      events: ['INSTALL']
+      events: ['FIRST_ORDER_CREATED_FE']
     }
 
     const branchOrderBody = {
       ...branchInstallBody,
-      events: ['FIRST_ORDER_CREATED_FE']
+      data_source: 'eo_install',
+      events: ['INSTALL']
     }
 
     const [campaignRes, dailyRes, branchInstallRes, branchOrderRes] = await Promise.all([
