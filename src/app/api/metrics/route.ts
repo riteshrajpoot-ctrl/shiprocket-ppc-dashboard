@@ -19,7 +19,7 @@ export async function GET(request: Request) {
         campaign_id,
         account_id,
         SUM(spend) as spend,
-        SUM(installs::numeric as installs,
+        SUM(installs::numeric) as installs,
         SUM(clicks) as clicks,
         SUM(impressions) as impressions,
         CASE WHEN SUM(installs::numeric) > 0 THEN ROUND(SUM(spend) / SUM(installs::numeric), 1) ELSE 0 END as cpi,
