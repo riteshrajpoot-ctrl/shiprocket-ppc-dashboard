@@ -43,7 +43,7 @@ export async function GET(request: Request) {
       branch_secret: BRANCH_SECRET,
       start_date: dateStart,
       end_date: dateEnd,
-      data_source: 'eo_click',
+      data_source: 'eo_install',
       dimensions: ['last_attributed_touch_data_tilde_campaign'],
       filters: { 'last_attributed_touch_data_tilde_channel': ['Facebook Ads'] },
       aggregation: 'unique_count',
