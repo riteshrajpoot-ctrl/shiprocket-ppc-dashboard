@@ -6,17 +6,17 @@ const BRANCH_SECRET = process.env.BRANCH_SECRET!
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const dateStart = searchParams.get('date_start') || '2026-06-11'
+    const dateStart = searchParams.get('date_start') || '2026-06-01'
     const dateEnd = searchParams.get('date_end') || '2026-06-17'
 
+    // Try eo_custom_event without any channel filter — same as what worked in other chat
     const body = {
       branch_key: BRANCH_KEY,
       branch_secret: BRANCH_SECRET,
       start_date: dateStart,
       end_date: dateEnd,
-      data_source: 'eo_install',
+      data_source: 'eo_custom_event',
       dimensions: ['last_attributed_touch_data_tilde_campaign'],
-      filters: { 'last_attributed_touch_data_tilde_channel': ['Facebook Ads'] },
       aggregation: 'unique_count',
       granularity: 'all',
       events: ['FIRST_ORDER_CREATED_FE']
@@ -28,12 +28,12 @@ export async function GET(request: Request) {
       body: JSON.stringify(body)
     })
 
-    const text = await res.text()
+    const json = await res.json()
     return NextResponse.json({
       status: res.status,
-      ok: res.ok,
-      body_sent: body,
-      response: JSON.parse(text)
+      total_results: json.results?.length || 0,
+      results: json.results || [],
+      error: json.error || null
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
