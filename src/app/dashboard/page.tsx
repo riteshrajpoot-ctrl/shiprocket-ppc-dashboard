@@ -6,12 +6,12 @@ import { TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, ChevronDown, Bell
 interface Campaign {
   campaign_name: string; campaign_id: string; objective: string
   spend: number; installs: number; clicks: number; leads: number
-  impressions: number; cpi: number; ctr: number; cpl: number; frequency: number; reach: number
+  impressions: number; cpi: number; ctr: number; cpl: number; frequency: number; reach: number; branch_installs: number; first_orders: number; cpo: number; install_to_order_rate: number
 }
 interface DailyRow { date: string; spend: number; installs: number; clicks: number; impressions: number; ctr: number; cpi: number }
 interface Alert { severity: 'critical' | 'warning'; msg: string; time: string; category: string }
 interface HealthItem { label: string; score: number; max: number }
-interface BudgetSuggestion { campaign_id: string; campaign_name: string; current_spend: number; cpi: number; installs: number; action: 'scale' | 'maintain' | 'reduce' | 'pause'; suggested_change_pct: number; reason: string }
+interface BudgetSuggestion { campaign_id: string; campaign_name: string; current_spend: number; cpi: number; cpo: number; installs: number; first_orders: number; action: 'scale' | 'maintain' | 'reduce' | 'pause'; suggested_change_pct: number; reason: string }
 interface MetricsData {
   campaigns: Campaign[]; daily: DailyRow[]; totals: any
   alerts: Alert[]; health: number; healthBreakdown: HealthItem[]; budgetSuggestions: BudgetSuggestion[]
@@ -73,6 +73,9 @@ function DrilldownModal({ campaign, onClose }: { campaign: Campaign; onClose: ()
             { label: 'Frequency', value: Number(campaign.frequency).toFixed(2) },
             { label: 'Reach', value: (Number(campaign.reach) / 1000).toFixed(1) + 'K' },
             { label: 'Leads', value: Number(campaign.leads) > 0 ? `${campaign.leads} (₹${Math.round(Number(campaign.cpl))} CPL)` : '—' },
+            { label: 'Branch installs', value: Number(campaign.branch_installs) > 0 ? Number(campaign.branch_installs).toLocaleString('en-IN') : '—' },
+            { label: 'First orders', value: Number(campaign.first_orders) > 0 ? Number(campaign.first_orders).toString() : '—' },
+            { label: 'CPO', value: Number(campaign.cpo) > 0 ? `₹${Math.round(Number(campaign.cpo))}` : '—' },
           ].map(m => (
             <div key={m.label} className="bg-slate-50 rounded-xl p-3">
               <div className="text-xs text-slate-400 mb-1">{m.label}</div>
@@ -139,7 +142,7 @@ function BudgetOptimizer({ suggestions, onClose }: { suggestions: BudgetSuggesti
                   <div className="text-xs text-slate-400 mt-0.5">{s.reason}</div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <div className="text-xs text-slate-500">₹{(s.current_spend / 1000).toFixed(1)}K · {s.installs} installs</div>
+                  <div className="text-xs text-slate-500">₹{(s.current_spend / 1000).toFixed(1)}K · {s.installs} installs · {s.first_orders > 0 ? s.first_orders + " orders" : "no orders yet"}</div>
                   <div className="text-xs font-medium text-slate-700">CPI ₹{Math.round(s.cpi)}</div>
                 </div>
                 <div className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${cfg.color}`}>
@@ -481,7 +484,9 @@ export default function Dashboard() {
                   <th className="text-right pb-2 font-medium w-16">Spend</th>
                   <th className="text-right pb-2 font-medium w-16">Installs</th>
                   <th className="text-right pb-2 font-medium w-12">CPI</th>
-                  <th className="text-right pb-2 font-medium w-12">CTR</th>
+                  <th className="text-right pb-2 font-medium w-14">1st Orders</th>
+                  <th className="text-right pb-2 font-medium w-12">CPO</th>
+                  <th className="text-right pb-2 font-medium w-10">CTR</th>
                   <th className="text-right pb-2 font-medium w-20">Objective</th>
                   <th className="w-5"></th>
                 </tr>
@@ -495,6 +500,16 @@ export default function Dashboard() {
                     <td className="text-right text-xs text-slate-700">₹{(Number(c.spend) / 1000).toFixed(1)}K</td>
                     <td className="text-right text-xs">{Number(c.installs) > 0 ? <span className={Number(c.installs) > 1000 ? 'text-emerald-600 font-medium' : 'text-slate-700'}>{Number(c.installs).toLocaleString('en-IN')}</span> : <span className="text-slate-400">—</span>}</td>
                     <td className="text-right"><CpiColor val={Number(c.cpi)} /></td>
+                    <td className="text-right text-xs">
+                      {Number(c.first_orders) > 0
+                        ? <span className="font-medium text-emerald-600">{Number(c.first_orders)}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="text-right text-xs">
+                      {Number(c.cpo) > 0
+                        ? <span className={Number(c.cpo) <= 800 ? 'font-medium text-emerald-600' : Number(c.cpo) <= 1500 ? 'font-medium text-amber-600' : 'font-medium text-red-500'}>₹{Math.round(Number(c.cpo))}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className={`text-right text-xs ${Number(c.ctr) < 0.3 ? 'text-red-500 font-medium' : 'text-slate-700'}`}>{Number(c.ctr).toFixed(2)}%</td>
                     <td className="text-right"><ObjBadge obj={c.objective} /></td>
                     <td className="text-right"><ChevronRight size={12} className="text-slate-300 group-hover:text-slate-500" /></td>
@@ -508,6 +523,8 @@ export default function Dashboard() {
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">₹{(totalSpend / 100000).toFixed(2)}L</td>
                     <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{totalInstalls.toLocaleString('en-IN')}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">₹{avgCPI}</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{campaigns.reduce((a,c) => a + Number(c.first_orders), 0)}</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{totals?.cpo > 0 ? `₹${Math.round(totals.cpo)}` : '—'}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">{avgCTR}%</td>
                     <td /><td />
                   </tr>
