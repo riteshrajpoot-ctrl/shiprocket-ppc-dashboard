@@ -134,7 +134,7 @@ export default function Dashboard() {
     setError(null)
     try {
       const range = getDateRange(tag)
-      const res = await fetch(`/api/metrics?date_start=${range.start}&date_end=${range.end}`)
+      const res = await fetch(`/api/live-metrics?date_start=${range.start}&date_end=${range.end}`)
       if (!res.ok) throw new Error(`API error ${res.status}`)
       const json: MetricsData = await res.json()
       setData(json)
