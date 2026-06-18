@@ -426,7 +426,7 @@ export default function Dashboard() {
             { label: 'Total installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), sub: 'App installs · all campaigns', delta: '+12% vs last month', trend: 'up' },
             { label: 'Cost per install', value: loading ? null : avgCPI > 0 ? `₹${avgCPI}` : '—', sub: 'Target: ₹120', delta: avgCPI > 0 && avgCPI < 120 ? `${Math.round((1 - avgCPI / 120) * 100)}% below target` : avgCPI >= 120 ? `${Math.round((avgCPI / 120 - 1) * 100)}% above target` : '—', trend: avgCPI > 0 && avgCPI < 120 ? 'up' : 'down' },
             { label: 'Total clicks', value: loading ? null : totalClicks.toLocaleString('en-IN'), sub: `Avg CTR: ${avgCTR}%`, delta: 'flat vs last week', trend: 'flat' },
-            { label: 'Leads generated', value: loading ? null : totalLeads.toString(), sub: totalLeads > 0 ? `Cost per lead: ₹${Math.round(leadSpend / totalLeads)}` : 'Cost per lead: —', delta: totals.cpl > 80 ? `₹${Math.round(totals.cpl)} CPL · above ₹80 target` : `₹${Math.round(totals.cpl)} CPL · on target`, trend: totals.cpl > 80 ? 'down' : 'up' },
+            { label: 'First orders (Branch)', value: loading ? null : campaigns.reduce((a, c) => a + Number(c.first_orders), 0).toString(), sub: `Avg CPO: ${totals?.cpo > 0 ? '₹' + Math.round(totals.cpo) : '—'}`, delta: totals?.cpo > 0 && totals.cpo <= 800 ? `₹${Math.round(totals.cpo)} CPO · on target` : totals?.cpo > 800 ? `₹${Math.round(totals.cpo)} CPO · above ₹800 target` : 'Awaiting first order data', trend: totals?.cpo > 0 && totals.cpo <= 800 ? 'up' : 'down' },
           ].map(k => (
             <div key={k.label} className="bg-white rounded-xl border border-slate-200 p-3.5">
               <div className="text-xs text-slate-400 mb-1.5">{k.label}</div>
