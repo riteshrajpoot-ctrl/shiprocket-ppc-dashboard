@@ -38,22 +38,27 @@ export async function GET(request: Request) {
     dailyUrl.searchParams.set('limit', '90')
     dailyUrl.searchParams.set('access_token', META_ACCESS_TOKEN)
 
-    const branchInstallBody = {
+    const branchOrderBody = {
       branch_key: BRANCH_KEY,
       branch_secret: BRANCH_SECRET,
       start_date: dateStart,
       end_date: dateEnd,
       data_source: 'eo_custom_event',
-      dimensions: ['last_attributed_touch_data_tilde_campaign'],
-      aggregation: 'unique_count',
+      dimensions: ['last_attributed_touch_data_tilde_campaign', 'name'],
+      metrics: ['total_count'],
       granularity: 'all',
-      events: ['FIRST_ORDER_CREATED_FE']
+      filters: { 'name': ['first_order_created_fe'] }
     }
 
-    const branchOrderBody = {
-      ...branchInstallBody,
+    const branchInstallBody = {
+      branch_key: BRANCH_KEY,
+      branch_secret: BRANCH_SECRET,
+      start_date: dateStart,
+      end_date: dateEnd,
       data_source: 'eo_install',
-      events: ['INSTALL']
+      dimensions: ['last_attributed_touch_data_tilde_campaign'],
+      metrics: ['total_count'],
+      granularity: 'all'
     }
 
     const [campaignRes, dailyRes, branchInstallRes, branchOrderRes] = await Promise.all([
