@@ -49,47 +49,47 @@ async function fetchChunk(
   })
 
   if (res.status === 429) {
-    // Rate limited — wait 2 seconds and retry once
-    await sleep(2000)
+    await sleep(3000)
     const retry = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!retry.ok) {
-      const text = await retry.text()
-      throw new Error(`Branch error ${retry.status}: ${text}`)
-    }
+    if (!retry.ok) throw new Error(`Branch error ${retry.status}: ${await retry.text()}`)
     const data = await retry.json()
     return data.results || []
   }
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Branch error ${res.status}: ${text}`)
-  }
-
+  if (!res.ok) throw new Error(`Branch error ${res.status}: ${await res.text()}`)
   const data = await res.json()
   return data.results || []
 }
 
 function normalizePartner(raw: string): string {
+  // Keep names exactly as Branch returns them — only normalize casing variants
   const map: Record<string, string> = {
-    'FACEBOOK': 'Meta (Facebook)',
-    'Facebook': 'Meta (Facebook)',
-    'facebook': 'Meta (Facebook)',
-    'Google AdWords': 'Google Ads',
-    'GOOGLE_ADWORDS': 'Google Ads',
-    'Apple Search Ads': 'Apple Search Ads',
-    'Vfine Ads': 'Vfine Ads',
-    'My Boors Media 1': 'My Boors Media',
-    'WingAds (Hong Kong) Technology Co., Limited': 'WingAds',
-    'ApplabsMedia': 'ApplabsMedia',
-    'Unpopulated': 'Unpopulated',
-    'Organic': 'Organic/Direct',
-    '': 'Organic/Direct',
+    'FACEBOOK': 'Facebook',
+    'facebook': 'Facebook',
+    'GOOGLE_ADWORDS': 'Google AdWords',
   }
+  // Return mapped value, or original raw value, or fallback
   return map[raw] || raw || 'Organic/Direct'
+}
+
+function mergeResults(chunkResults: any[][]): Record<string, { campaign: string; ad_partner: string; count: number }> {
+  const map: Record<string, { campaign: string; ad_partner: string; count: number }> = {}
+  for (const results of chunkResults) {
+    for (const r of results) {
+      const result = r.result || {}
+      const campaign = result['last_attributed_touch_data_tilde_campaign'] || 'Organic/Direct'
+      const partner = normalizePartner(result['last_attributed_touch_data_tilde_advertising_partner_name'] || '')
+      const count = result.total_count || 0
+      const key = `${campaign}||${partner}`
+      if (!map[key]) map[key] = { campaign, ad_partner: partner, count: 0 }
+      map[key].count += count
+    }
+  }
+  return map
 }
 
 export async function GET(request: Request) {
@@ -112,83 +112,93 @@ export async function GET(request: Request) {
   try {
     const chunks = chunkDateRange(startDate, endDate, 7)
 
-    // Fetch SEQUENTIALLY with 500ms delay to avoid rate limits
-    const orderMap: Record<string, { campaign: string; ad_partner: string; orders: number }> = {}
-    const installMap: Record<string, number> = {}
-
+    // Fetch orders sequentially
+    const orderChunks: any[][] = []
     for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
-      if (i > 0) await sleep(500) // 500ms between chunks
-
-      // First orders
-      const orderResults = await fetchChunk(
-        branchKey, branchSecret, chunk.start, chunk.end,
+      if (i > 0) await sleep(600)
+      const results = await fetchChunk(
+        branchKey, branchSecret,
+        chunks[i].start, chunks[i].end,
         'eo_custom_event',
         { name: ['first_order_created_fe'] },
         dimensions
       )
+      orderChunks.push(results)
+    }
 
-      await sleep(300) // small delay between the two calls
+    await sleep(600)
 
-      // Installs
-      const installResults = await fetchChunk(
-        branchKey, branchSecret, chunk.start, chunk.end,
+    // Fetch installs sequentially
+    const installChunks: any[][] = []
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(600)
+      const results = await fetchChunk(
+        branchKey, branchSecret,
+        chunks[i].start, chunks[i].end,
         'eo_install',
         {},
         dimensions
       )
-
-      // Process orders
-      for (const r of orderResults) {
-        const result = r.result || {}
-        const campaign = result['last_attributed_touch_data_tilde_campaign'] || 'Organic/Direct'
-        const partner = normalizePartner(result['last_attributed_touch_data_tilde_advertising_partner_name'] || '')
-        const orders = result.total_count || 0
-        const key = `${campaign}||${partner}`
-        if (!orderMap[key]) orderMap[key] = { campaign, ad_partner: partner, orders: 0 }
-        orderMap[key].orders += orders
-      }
-
-      // Process installs
-      for (const r of installResults) {
-        const result = r.result || {}
-        const campaign = result['last_attributed_touch_data_tilde_campaign'] || 'Organic/Direct'
-        const partner = normalizePartner(result['last_attributed_touch_data_tilde_advertising_partner_name'] || '')
-        const installs = result.total_count || 0
-        const key = `${campaign}||${partner}`
-        installMap[key] = (installMap[key] || 0) + installs
-      }
+      installChunks.push(results)
     }
 
-    // Combine
-    const allKeys = new Set([...Object.keys(orderMap), ...Object.keys(installMap)])
-    const byCampaign = Array.from(allKeys)
-      .map(key => {
-        const [campaign, ad_partner] = key.split('||')
-        const installs = installMap[key] || 0
-        const orders = orderMap[key]?.orders || 0
-        return {
-          campaign,
-          ad_partner,
-          installs,
-          orders,
-          conversion_rate: installs > 0 && orders > 0
-            ? parseFloat(((orders / installs) * 100).toFixed(2))
-            : 0,
-        }
-      })
-      .filter(c => c.installs > 0 || c.orders > 0)
+    const orderMap = mergeResults(orderChunks)
+    const installMap = mergeResults(installChunks)
+
+    // Build order campaigns list (source of truth for first orders)
+    const orderCampaigns = Object.entries(orderMap)
+      .map(([key, d]) => ({
+        campaign: d.campaign,
+        ad_partner: d.ad_partner,
+        orders: d.count,
+        // Only show installs if the exact campaign+partner combo exists in install data
+        installs: installMap[key]?.count || 0,
+      }))
+      .filter(c => c.orders > 0)
       .sort((a, b) => b.orders - a.orders)
+
+    // Build install-only campaigns (campaigns with installs but no orders yet)
+    const installOnlyCampaigns = Object.entries(installMap)
+      .filter(([key]) => !orderMap[key])
+      .map(([key, d]) => ({
+        campaign: d.campaign,
+        ad_partner: d.ad_partner,
+        orders: 0,
+        installs: d.count,
+      }))
+      .filter(c => c.installs > 0)
+      .sort((a, b) => b.installs - a.installs)
+
+    // Combine: order campaigns first, then install-only
+    const byCampaign = [
+      ...orderCampaigns.map(c => ({
+        ...c,
+        conversion_rate: c.installs > 0 ? parseFloat(((c.orders / c.installs) * 100).toFixed(2)) : null,
+      })),
+      ...installOnlyCampaigns.map(c => ({
+        ...c,
+        conversion_rate: null,
+      })),
+    ]
 
     const totalOrders = byCampaign.reduce((s, c) => s + c.orders, 0)
     const totalInstalls = byCampaign.reduce((s, c) => s + c.installs, 0)
 
+    // Partner summary — from orders (primary)
     const partnerMap: Record<string, { installs: number; orders: number }> = {}
-    byCampaign.forEach(c => {
+    for (const c of byCampaign) {
       if (!partnerMap[c.ad_partner]) partnerMap[c.ad_partner] = { installs: 0, orders: 0 }
       partnerMap[c.ad_partner].installs += c.installs
       partnerMap[c.ad_partner].orders += c.orders
-    })
+    }
+
+    // Also add install partners not in orders
+    for (const [key, d] of Object.entries(installMap)) {
+      if (!orderMap[key]) {
+        if (!partnerMap[d.ad_partner]) partnerMap[d.ad_partner] = { installs: 0, orders: 0 }
+        partnerMap[d.ad_partner].installs += d.count
+      }
+    }
 
     return NextResponse.json({
       total_orders: totalOrders,
