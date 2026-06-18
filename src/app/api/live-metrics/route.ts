@@ -12,6 +12,92 @@ const FREQUENCY_MAX = 2.5
 const MONTHLY_BUDGET = 350000
 const CPO_TARGET = 800
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+function chunkDateRange(start: string, end: string, chunkDays = 7) {
+  const chunks = []
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+  let current = new Date(startDate)
+  while (current <= endDate) {
+    const chunkEnd = new Date(current)
+    chunkEnd.setDate(chunkEnd.getDate() + chunkDays - 1)
+    if (chunkEnd > endDate) chunkEnd.setTime(endDate.getTime())
+    chunks.push({
+      start: current.toISOString().split('T')[0],
+      end: chunkEnd.toISOString().split('T')[0],
+    })
+    current = new Date(chunkEnd)
+    current.setDate(current.getDate() + 1)
+  }
+  return chunks
+}
+
+async function fetchBranchChunk(startDate: string, endDate: string, dataSource: string, filters: any, dimensions: string[]): Promise<any[]> {
+  const body = {
+    branch_key: BRANCH_KEY,
+    branch_secret: BRANCH_SECRET,
+    start_date: startDate,
+    end_date: endDate,
+    data_source: dataSource,
+    aggregation: 'total_count',
+    dimensions,
+    filters,
+    granularity: 'all',
+  }
+  const res = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 429) { await sleep(3000); return [] }
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.results || []
+}
+
+async function fetchBranchData(startDate: string, endDate: string): Promise<Record<string, { installs: number; firstOrders: number }>> {
+  const chunks = chunkDateRange(startDate, endDate, 7)
+  const branchMap: Record<string, { installs: number; firstOrders: number }> = {}
+  const dimensions = ['last_attributed_touch_data_tilde_campaign']
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await sleep(600)
+
+    // Fetch first orders
+    const orderResults = await fetchBranchChunk(
+      chunks[i].start, chunks[i].end,
+      'eo_custom_event',
+      { name: ['first_order_created_fe'] },
+      dimensions
+    )
+    for (const r of orderResults) {
+      const name = r.result?.['last_attributed_touch_data_tilde_campaign']
+      if (!name) continue
+      if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
+      branchMap[name].firstOrders += r.result?.total_count || 0
+    }
+
+    await sleep(400)
+
+    // Fetch installs
+    const installResults = await fetchBranchChunk(
+      chunks[i].start, chunks[i].end,
+      'eo_install',
+      {},
+      dimensions
+    )
+    for (const r of installResults) {
+      const name = r.result?.['last_attributed_touch_data_tilde_campaign']
+      if (!name) continue
+      if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
+      branchMap[name].installs += r.result?.total_count || 0
+    }
+  }
+
+  return branchMap
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -20,7 +106,7 @@ export async function GET(request: Request) {
     const dateEnd = searchParams.get('date_end') ||
       new Date().toISOString().split('T')[0]
 
-    // ── Fetch Meta + Branch in parallel ──────────────────────────────────────
+    // Fetch Meta campaigns, daily data, and Branch data
     const campaignUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
     campaignUrl.searchParams.set('fields', 'campaign_name,campaign_id,spend,impressions,clicks,ctr,cpc,reach,frequency,actions,objective')
     campaignUrl.searchParams.set('level', 'campaign')
@@ -38,42 +124,11 @@ export async function GET(request: Request) {
     dailyUrl.searchParams.set('limit', '90')
     dailyUrl.searchParams.set('access_token', META_ACCESS_TOKEN)
 
-    const branchOrderBody = {
-      branch_key: BRANCH_KEY,
-      branch_secret: BRANCH_SECRET,
-      start_date: dateStart,
-      end_date: dateEnd,
-      data_source: 'eo_custom_event',
-      dimensions: ['last_attributed_touch_data_tilde_campaign', 'name'],
-      metrics: ['total_count'],
-      granularity: 'all',
-      filters: { 'name': ['first_order_created_fe'] }
-    }
-
-    const branchInstallBody = {
-      branch_key: BRANCH_KEY,
-      branch_secret: BRANCH_SECRET,
-      start_date: dateStart,
-      end_date: dateEnd,
-      data_source: 'eo_install',
-      dimensions: ['last_attributed_touch_data_tilde_campaign'],
-      metrics: ['total_count'],
-      granularity: 'all'
-    }
-
-    const [campaignRes, dailyRes, branchInstallRes, branchOrderRes] = await Promise.all([
+    // Fetch Meta and Branch in parallel
+    const [campaignRes, dailyRes, branchMap] = await Promise.all([
       fetch(campaignUrl.toString()),
       fetch(dailyUrl.toString()),
-      fetch('https://api2.branch.io/v1/query/analytics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(branchInstallBody)
-      }).catch(() => null),
-      fetch('https://api2.branch.io/v1/query/analytics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(branchOrderBody)
-      }).catch(() => null)
+      fetchBranchData(dateStart, dateEnd),
     ])
 
     if (!campaignRes.ok) throw new Error(`Meta API error: ${campaignRes.status}`)
@@ -83,32 +138,7 @@ export async function GET(request: Request) {
     const dailyJson = await dailyRes.json()
     const rawDaily: any[] = dailyJson.data || []
 
-    // ── Parse Branch data ─────────────────────────────────────────────────────
-    const branchMap: Record<string, { installs: number; firstOrders: number }> = {}
-
-    if (branchInstallRes?.ok) {
-      const json = await branchInstallRes.json()
-      const results: any[] = json.results || []
-      for (const row of results) {
-        const name = row.result?.last_attributed_touch_data_tilde_campaign
-        if (!name) continue
-        if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
-        branchMap[name].installs = Number(row.result?.total_count || 0)
-      }
-    }
-
-    if (branchOrderRes?.ok) {
-      const json = await branchOrderRes.json()
-      const results: any[] = json.results || []
-      for (const row of results) {
-        const name = row.result?.last_attributed_touch_data_tilde_campaign
-        if (!name) continue
-        if (!branchMap[name]) branchMap[name] = { installs: 0, firstOrders: 0 }
-        branchMap[name].firstOrders = Number(row.result?.total_count || 0)
-      }
-    }
-
-    // ── Transform campaigns ───────────────────────────────────────────────────
+    // Transform campaigns — match Branch by full campaign name
     const campaigns = rawCampaigns.map((c: any) => {
       const actions: any[] = c.actions || []
       const installs = Number(actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ?? 0)
@@ -118,9 +148,8 @@ export async function GET(request: Request) {
       const impressions = Number(c.impressions)
       const frequency = Number(c.frequency ?? 0)
 
-      // Match Branch data by campaign name (Branch uses full name, Meta strips prefix)
-      const branchKey = c.campaign_name
-      const branch = branchMap[branchKey] || { installs: 0, firstOrders: 0 }
+      // Branch uses full campaign name (same as Meta)
+      const branch = branchMap[c.campaign_name] || { installs: 0, firstOrders: 0 }
       const firstOrders = branch.firstOrders
       const branchInstalls = branch.installs
       const cpo = firstOrders > 0 ? Math.round(spend / firstOrders * 10) / 10 : 0
@@ -147,7 +176,7 @@ export async function GET(request: Request) {
       }
     })
 
-    // ── Transform daily ───────────────────────────────────────────────────────
+    // Transform daily
     const daily = rawDaily.map((d: any) => {
       const actions: any[] = d.actions || []
       const installs = Number(actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ?? 0)
@@ -165,7 +194,7 @@ export async function GET(request: Request) {
       }
     })
 
-    // ── Totals ────────────────────────────────────────────────────────────────
+    // Totals
     const totals: any = campaigns.reduce((acc: any, c: any) => ({
       spend: acc.spend + c.spend,
       installs: acc.installs + c.installs,
@@ -179,7 +208,7 @@ export async function GET(request: Request) {
     totals.cpl = totals.leads > 0 ? Math.round(totals.spend / totals.leads * 10) / 10 : 0
     totals.cpo = totals.first_orders > 0 ? Math.round(totals.spend / totals.first_orders * 10) / 10 : 0
 
-    // ── Dynamic alerts ────────────────────────────────────────────────────────
+    // Alerts
     const alerts: any[] = []
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
@@ -205,7 +234,7 @@ export async function GET(request: Request) {
       alerts.push({ severity: 'warning', msg: `${c.campaign_name} frequency ${c.frequency.toFixed(1)} — consider creative refresh`, time: 'Now', category: 'frequency' })
     })
 
-    // ── Health score ──────────────────────────────────────────────────────────
+    // Health score
     const pacingDiff = Math.abs(actualPct - expectedPct)
     const avgCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0
     const activeCampaigns = campaigns.filter((c: any) => c.spend > 500).length
@@ -225,10 +254,8 @@ export async function GET(request: Request) {
     ]
     const health = Math.min(100, Math.max(0, healthBreakdown.reduce((a, s) => a + s.score, 0)))
 
-    // ── Budget optimizer — now uses CPO when available ────────────────────────
+    // Budget optimizer
     const installCampaigns = campaigns.filter((c: any) => c.installs > 0 && ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective))
-
-    // Sort by CPO if available, else CPI
     const hasCpoData = installCampaigns.some((c: any) => c.first_orders > 0)
     const sorted = [...installCampaigns].sort((a: any, b: any) => {
       if (hasCpoData) {
