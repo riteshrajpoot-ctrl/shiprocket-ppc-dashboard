@@ -1,40 +1,61 @@
 import { NextResponse } from 'next/server'
 
-const BRANCH_KEY = process.env.BRANCH_KEY!
-const BRANCH_SECRET = process.env.BRANCH_SECRET!
+export async function GET() {
+  const branchKey = process.env.BRANCH_KEY
+  const branchSecret = process.env.BRANCH_SECRET
+  const appId = process.env.BRANCH_APP_ID || '1342462952309018934'
 
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const dateStart = searchParams.get('date_start') || '2026-06-01'
-    const dateEnd = searchParams.get('date_end') || '2026-06-17'
-
-    const body = {
-      branch_key: BRANCH_KEY,
-      branch_secret: BRANCH_SECRET,
-      start_date: dateStart,
-      end_date: dateEnd,
-      data_source: 'eo_custom_event',
-      dimensions: ['last_attributed_touch_data_tilde_campaign', 'name'],
-      metrics: ['total_count'],
-      granularity: 'all',
-      filters: { 'name': ['first_order_created_fe'] }
-    }
-
-    const res = await fetch('https://api2.branch.io/v1/query/analytics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-
-    const json = await res.json()
-    return NextResponse.json({
-      status: res.status,
-      total_results: json.results?.length || 0,
-      results: json.results || [],
-      error: json.error || null
-    })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!branchKey || !branchSecret) {
+    return NextResponse.json({ error: 'Missing env vars', has_key: !!branchKey, has_secret: !!branchSecret })
   }
+
+  const credentials = Buffer.from(`${branchKey}:${branchSecret}`).toString('base64')
+
+  // Test 1: Query API with app_id in body
+  const body1 = {
+    app_id: appId,
+    start_date: '2026-06-01',
+    end_date: '2026-06-18',
+    data_source: 'eo_custom_event',
+    dimensions: ['last_attributed_touch_data_tilde_campaign'],
+    metrics: ['total_count'],
+    granularity: 'all',
+    filters: { name: ['first_order_created_fe'] },
+  }
+
+  // Test 2: Without app_id
+  const body2 = {
+    start_date: '2026-06-01',
+    end_date: '2026-06-18',
+    data_source: 'eo_custom_event',
+    dimensions: ['last_attributed_touch_data_tilde_campaign'],
+    metrics: ['total_count'],
+    granularity: 'all',
+    filters: { name: ['first_order_created_fe'] },
+  }
+
+  const [res1, res2] = await Promise.all([
+    fetch('https://api2.branch.io/v1/query/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${credentials}` },
+      body: JSON.stringify(body1),
+    }),
+    fetch('https://api2.branch.io/v1/query/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${credentials}` },
+      body: JSON.stringify(body2),
+    }),
+  ])
+
+  const [text1, text2] = await Promise.all([res1.text(), res2.text()])
+
+  return NextResponse.json({
+    key_prefix: branchKey.slice(0, 12) + '...',
+    secret_prefix: branchSecret.slice(0, 12) + '...',
+    app_id: appId,
+    key_length: branchKey.length,
+    secret_length: branchSecret.length,
+    test1_with_app_id: { status: res1.status, body: text1 },
+    test2_without_app_id: { status: res2.status, body: text2 },
+  })
 }
