@@ -20,19 +20,6 @@ function chunkDateRange(start: string, end: string, chunkDays = 7): { start: str
   return chunks
 }
 
-function extractDimension(r: any, ...keys: string[]): string {
-  // Branch returns dimensions in different formats — try all possible locations
-  for (const key of keys) {
-    // Format 1: r.dimensions['key_name']
-    if (r.dimensions?.[key]) return r.dimensions[key]
-    // Format 2: r['key_name'] directly
-    if (r[key]) return r[key]
-    // Format 3: r.dimension['key_name']
-    if (r.dimension?.[key]) return r.dimension[key]
-  }
-  return ''
-}
-
 async function fetchBranchChunk(
   branchKey: string,
   branchSecret: string,
@@ -85,37 +72,25 @@ export async function GET(request: Request) {
       chunks.map(c => fetchBranchChunk(branchKey, branchSecret, c.start, c.end))
     )
 
-    // Log first result to understand structure
-    const firstResult = chunkResults[0]?.[0]
-    console.log('Branch first result sample:', JSON.stringify(firstResult))
-
     // Merge results across chunks
+    // Branch returns dimensions INSIDE r.result object alongside total_count
     const merged: Record<string, { campaign: string; ad_partner: string; orders: number }> = {}
 
     for (const results of chunkResults) {
       for (const r of results) {
-        // Try multiple key formats Branch uses
+        const result = r.result || {}
+
         const campaign =
-          extractDimension(r,
-            'last_attributed_touch_data_tilde_campaign',
-            'tilde_campaign',
-            'campaign'
-          ) || 'Organic/Direct'
+          result['last_attributed_touch_data_tilde_campaign'] ||
+          r['last_attributed_touch_data_tilde_campaign'] ||
+          'Organic/Direct'
 
         const partner =
-          extractDimension(r,
-            'last_attributed_touch_data_tilde_advertising_partner_name',
-            'tilde_advertising_partner_name',
-            'advertising_partner_name',
-            'ad_partner'
-          ) || 'Organic/Direct'
+          result['last_attributed_touch_data_tilde_advertising_partner_name'] ||
+          r['last_attributed_touch_data_tilde_advertising_partner_name'] ||
+          'Organic/Direct'
 
-        const orders =
-          r.result?.total_count ||
-          r.result?.value ||
-          r.total_count ||
-          r.value ||
-          0
+        const orders = result.total_count || 0
 
         const key = `${campaign}||${partner}`
         if (!merged[key]) merged[key] = { campaign, ad_partner: partner, orders: 0 }
@@ -123,7 +98,10 @@ export async function GET(request: Request) {
       }
     }
 
-    const byCampaign = Object.values(merged).sort((a, b) => b.orders - a.orders)
+    const byCampaign = Object.values(merged)
+      .filter(c => c.orders > 0)
+      .sort((a, b) => b.orders - a.orders)
+
     const totalOrders = byCampaign.reduce((s, c) => s + c.orders, 0)
 
     const partnerMap: Record<string, number> = {}
@@ -143,8 +121,6 @@ export async function GET(request: Request) {
         .sort((a, b) => b.orders - a.orders),
       date_range: { start: startDate, end: endDate },
       chunks_fetched: chunks.length,
-      // Debug: include raw sample to see structure
-      debug_sample: firstResult || null,
     })
 
   } catch (err: any) {
