@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-function chunkDateRange(start: string, end: string, chunkDays = 7): { start: string; end: string }[] {
+function chunkDateRange(start: string, end: string, chunkDays = 7) {
   const chunks = []
   const startDate = new Date(start)
   const endDate = new Date(end)
@@ -18,6 +18,8 @@ function chunkDateRange(start: string, end: string, chunkDays = 7): { start: str
   }
   return chunks
 }
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 async function fetchChunk(
   branchKey: string,
@@ -46,13 +48,31 @@ async function fetchChunk(
     body: JSON.stringify(body),
   })
 
-  const text = await res.text()
-  if (!res.ok) throw new Error(`Branch error ${res.status}: ${text}`)
-  const data = JSON.parse(text)
+  if (res.status === 429) {
+    // Rate limited — wait 2 seconds and retry once
+    await sleep(2000)
+    const retry = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!retry.ok) {
+      const text = await retry.text()
+      throw new Error(`Branch error ${retry.status}: ${text}`)
+    }
+    const data = await retry.json()
+    return data.results || []
+  }
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Branch error ${res.status}: ${text}`)
+  }
+
+  const data = await res.json()
   return data.results || []
 }
 
-// Normalize partner names to display names
 function normalizePartner(raw: string): string {
   const map: Record<string, string> = {
     'FACEBOOK': 'Meta (Facebook)',
@@ -64,6 +84,7 @@ function normalizePartner(raw: string): string {
     'Vfine Ads': 'Vfine Ads',
     'My Boors Media 1': 'My Boors Media',
     'WingAds (Hong Kong) Technology Co., Limited': 'WingAds',
+    'ApplabsMedia': 'ApplabsMedia',
     'Unpopulated': 'Unpopulated',
     'Organic': 'Organic/Direct',
     '': 'Organic/Direct',
@@ -83,66 +104,76 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing Branch credentials' }, { status: 500 })
   }
 
+  const dimensions = [
+    'last_attributed_touch_data_tilde_campaign',
+    'last_attributed_touch_data_tilde_advertising_partner_name',
+  ]
+
   try {
     const chunks = chunkDateRange(startDate, endDate, 7)
 
-    // Fetch first orders (eo_custom_event) and installs (eo_install) in parallel per chunk
-    const [orderResults, installResults] = await Promise.all([
-      Promise.all(chunks.map(c => fetchChunk(
-        branchKey, branchSecret, c.start, c.end,
+    // Fetch SEQUENTIALLY with 500ms delay to avoid rate limits
+    const orderMap: Record<string, { campaign: string; ad_partner: string; orders: number }> = {}
+    const installMap: Record<string, number> = {}
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      if (i > 0) await sleep(500) // 500ms between chunks
+
+      // First orders
+      const orderResults = await fetchChunk(
+        branchKey, branchSecret, chunk.start, chunk.end,
         'eo_custom_event',
         { name: ['first_order_created_fe'] },
-        ['last_attributed_touch_data_tilde_campaign', 'last_attributed_touch_data_tilde_advertising_partner_name']
-      ))),
-      Promise.all(chunks.map(c => fetchChunk(
-        branchKey, branchSecret, c.start, c.end,
+        dimensions
+      )
+
+      await sleep(300) // small delay between the two calls
+
+      // Installs
+      const installResults = await fetchChunk(
+        branchKey, branchSecret, chunk.start, chunk.end,
         'eo_install',
         {},
-        ['last_attributed_touch_data_tilde_campaign', 'last_attributed_touch_data_tilde_advertising_partner_name']
-      ))),
-    ])
+        dimensions
+      )
 
-    // Merge first orders
-    const orderMap: Record<string, { campaign: string; ad_partner: string; orders: number }> = {}
-    for (const results of orderResults) {
-      for (const r of results) {
+      // Process orders
+      for (const r of orderResults) {
         const result = r.result || {}
         const campaign = result['last_attributed_touch_data_tilde_campaign'] || 'Organic/Direct'
-        const partnerRaw = result['last_attributed_touch_data_tilde_advertising_partner_name'] || ''
-        const partner = normalizePartner(partnerRaw)
+        const partner = normalizePartner(result['last_attributed_touch_data_tilde_advertising_partner_name'] || '')
         const orders = result.total_count || 0
         const key = `${campaign}||${partner}`
         if (!orderMap[key]) orderMap[key] = { campaign, ad_partner: partner, orders: 0 }
         orderMap[key].orders += orders
       }
-    }
 
-    // Merge installs
-    const installMap: Record<string, number> = {}
-    for (const results of installResults) {
-      for (const r of results) {
+      // Process installs
+      for (const r of installResults) {
         const result = r.result || {}
         const campaign = result['last_attributed_touch_data_tilde_campaign'] || 'Organic/Direct'
-        const partnerRaw = result['last_attributed_touch_data_tilde_advertising_partner_name'] || ''
-        const partner = normalizePartner(partnerRaw)
+        const partner = normalizePartner(result['last_attributed_touch_data_tilde_advertising_partner_name'] || '')
         const installs = result.total_count || 0
         const key = `${campaign}||${partner}`
         installMap[key] = (installMap[key] || 0) + installs
       }
     }
 
-    // Combine into final campaign list
+    // Combine
     const allKeys = new Set([...Object.keys(orderMap), ...Object.keys(installMap)])
     const byCampaign = Array.from(allKeys)
       .map(key => {
         const [campaign, ad_partner] = key.split('||')
+        const installs = installMap[key] || 0
+        const orders = orderMap[key]?.orders || 0
         return {
           campaign,
           ad_partner,
-          installs: installMap[key] || 0,
-          orders: orderMap[key]?.orders || 0,
-          conversion_rate: installMap[key] > 0 && orderMap[key]?.orders > 0
-            ? parseFloat(((orderMap[key].orders / installMap[key]) * 100).toFixed(2))
+          installs,
+          orders,
+          conversion_rate: installs > 0 && orders > 0
+            ? parseFloat(((orders / installs) * 100).toFixed(2))
             : 0,
         }
       })
@@ -152,7 +183,6 @@ export async function GET(request: Request) {
     const totalOrders = byCampaign.reduce((s, c) => s + c.orders, 0)
     const totalInstalls = byCampaign.reduce((s, c) => s + c.installs, 0)
 
-    // Group by partner
     const partnerMap: Record<string, { installs: number; orders: number }> = {}
     byCampaign.forEach(c => {
       if (!partnerMap[c.ad_partner]) partnerMap[c.ad_partner] = { installs: 0, orders: 0 }
