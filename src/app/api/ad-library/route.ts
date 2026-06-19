@@ -6,7 +6,7 @@ export async function GET(request: Request) {
 
   if (!brand) return NextResponse.json({ error: 'Brand name required' }, { status: 400 })
 
-  const token = process.env.META_ACCESS_TOKEN
+  const token = process.env.META_AD_LIBRARY_TOKEN || process.env.META_ACCESS_TOKEN
   if (!token) return NextResponse.json({ error: 'Missing META_ACCESS_TOKEN' }, { status: 500 })
 
   try {
