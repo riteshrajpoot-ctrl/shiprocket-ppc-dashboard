@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL('https://graph.facebook.com/v19.0/ads_archive')
     url.searchParams.set('access_token', token)
-    url.searchParams.set('ad_reached_countries', '["IN"]')
+    url.searchParams.set('ad_reached_countries', 'IN')
     url.searchParams.set('search_terms', brand)
     url.searchParams.set('ad_active_status', 'ACTIVE')
     url.searchParams.set('fields', 'id,page_name,creative_body,creative_title,creative_link_caption,ad_snapshot_url,delivery_start_time,impressions,spend,currency')
