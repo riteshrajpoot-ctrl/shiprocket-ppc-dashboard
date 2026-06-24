@@ -44,20 +44,24 @@ interface ScriptVariant {
 export default function IntelligencePage() {
   const [activeTab, setActiveTab] = useState<Tab>('analyze')
 
-  // Analyse tab state
+  // Analyse tab
   const [ads, setAds] = useState<AdReport[]>([])
   const [loadingAds, setLoadingAds] = useState(false)
-  const [selectedAd, setSelectedAd] = useState<AdReport | null>(null)
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
+  const [adSearch, setAdSearch] = useState('')
   const [dateStart, setDateStart] = useState(() => {
-    const d = new Date(); d.setDate(1)
-    return d.toISOString().split('T')[0]
+    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
   })
   const [dateEnd] = useState(() => new Date().toISOString().split('T')[0])
-  const [adSearch, setAdSearch] = useState('')
 
-  // Script generator state
+  // Modal state
+  const [modalAd, setModalAd] = useState<AdReport | null>(null)
+  const [modalAnalysis, setModalAnalysis] = useState<AnalysisResult | null>(null)
+  const [modalAnalyzing, setModalAnalyzing] = useState(false)
+  const [modalAlternatives, setModalAlternatives] = useState<ScriptVariant[]>([])
+  const [generatingAlts, setGeneratingAlts] = useState(false)
+  const [copiedAlt, setCopiedAlt] = useState<number | null>(null)
+
+  // Script generator tab
   const [objective, setObjective] = useState('First order conversion')
   const [audience, setAudience] = useState('3-wheeler / EV operators')
   const [offer, setOffer] = useState('')
@@ -80,60 +84,80 @@ export default function IntelligencePage() {
 
   const fetchAds = async () => {
     setLoadingAds(true)
-    setSelectedAd(null)
-    setAnalysisResult(null)
     try {
       const res = await fetch(`/api/ad-level-report?date_start=${dateStart}&date_end=${dateEnd}`)
       const data = await res.json()
       setAds(data.ads || [])
-    } catch {
-      alert('Failed to fetch ads. Check Meta token.')
-    }
+    } catch { alert('Failed to fetch ads.') }
     setLoadingAds(false)
   }
 
   useEffect(() => { fetchAds() }, [])
 
-  const runAnalysis = async (ad: AdReport) => {
-    setSelectedAd(ad)
-    setAnalyzing(true)
-    setAnalysisResult(null)
+  const openModal = async (ad: AdReport) => {
+    setModalAd(ad)
+    setModalAnalysis(null)
+    setModalAlternatives([])
+    setModalAnalyzing(true)
     try {
       const res = await fetch('/api/analyze-creative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           copy: `Ad name: ${ad.ad_name}\nCampaign: ${ad.campaign_name}\nHook/body: ${ad.creative_body}\nTitle: ${ad.creative_title}`,
-          metrics: {
-            spend: ad.spend,
-            ctr: ad.ctr,
-            cpc: ad.cpc,
-            installs: ad.installs,
-            cpi: ad.cpi,
-            impressions: ad.impressions,
-          }
+          metrics: { spend: ad.spend, ctr: ad.ctr, cpc: ad.cpc, installs: ad.installs, cpi: ad.cpi, impressions: ad.impressions }
         }),
       })
       const data = await res.json()
-      setAnalysisResult(data)
-    } catch {
-      alert('Analysis failed.')
-    }
-    setAnalyzing(false)
+      setModalAnalysis(data)
+    } catch { alert('Analysis failed.') }
+    setModalAnalyzing(false)
+  }
+
+  const closeModal = () => {
+    setModalAd(null)
+    setModalAnalysis(null)
+    setModalAlternatives([])
+    setGeneratingAlts(false)
+  }
+
+  const generateAlternatives = async () => {
+    if (!modalAd || !modalAnalysis) return
+    setGeneratingAlts(true)
+    setModalAlternatives([])
+    const issuesSummary = modalAnalysis.improvements.join('. ')
+    try {
+      const res = await fetch('/api/generate-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          objective: 'Improve underperforming ad',
+          audience: 'Same target audience as original ad',
+          offer: `Original ad: "${modalAd.creative_body || modalAd.ad_name}". Key issues to fix: ${issuesSummary}`,
+          tone: 'Urgent',
+          refCreative: modalAd.creative_body || modalAd.ad_name,
+        }),
+      })
+      const data = await res.json()
+      setModalAlternatives(data.variants || [])
+    } catch { alert('Generation failed.') }
+    setGeneratingAlts(false)
+  }
+
+  const copyAlt = (idx: number, v: ScriptVariant) => {
+    navigator.clipboard.writeText(`HOOK: ${v.hook}\n\nBODY: ${v.body}\n\nCTA: ${v.cta}`)
+    setCopiedAlt(idx)
+    setTimeout(() => setCopiedAlt(null), 2000)
   }
 
   const handleRefUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const b64 = await toBase64(file)
-    setRefImage(b64)
-    setRefImageName(file.name)
+    const file = e.target.files?.[0]; if (!file) return
+    setRefImage(await toBase64(file)); setRefImageName(file.name)
   }
 
   const generateScripts = async () => {
     if (!offer) return
-    setGenerating(true)
-    setScripts([])
+    setGenerating(true); setScripts([])
     try {
       const res = await fetch('/api/generate-creative', {
         method: 'POST',
@@ -142,20 +166,17 @@ export default function IntelligencePage() {
       })
       const data = await res.json()
       setScripts(data.variants || [])
-    } catch {
-      alert('Generation failed.')
-    }
+    } catch { alert('Generation failed.') }
     setGenerating(false)
   }
 
   const copyScript = (idx: number, v: ScriptVariant) => {
     navigator.clipboard.writeText(`HOOK: ${v.hook}\n\nBODY: ${v.body}\n\nCTA: ${v.cta}`)
-    setCopiedIdx(idx)
-    setTimeout(() => setCopiedIdx(null), 2000)
+    setCopiedIdx(idx); setTimeout(() => setCopiedIdx(null), 2000)
   }
 
-  const scoreColor = (s: number) =>
-    s >= 8 ? '#059669' : s >= 6 ? '#D97706' : '#DC2626'
+  const scoreColor = (s: number) => s >= 8 ? '#059669' : s >= 6 ? '#D97706' : '#DC2626'
+  const scoreBg = (s: number) => s >= 8 ? '#ECFDF5' : s >= 6 ? '#FFFBEB' : '#FEF2F2'
 
   const filteredAds = ads.filter(a =>
     !adSearch || a.ad_name.toLowerCase().includes(adSearch.toLowerCase()) ||
@@ -164,7 +185,244 @@ export default function IntelligencePage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#F8F9FA' }}>
-      {/* Header */}
+
+      {/* ── FULL SCREEN MODAL ── */}
+      {modalAd && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-start',
+          justifyContent: 'center', overflowY: 'auto', padding: '24px 16px'
+        }} onClick={e => { if (e.target === e.currentTarget) closeModal() }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, width: '100%', maxWidth: 1000,
+            boxShadow: '0 24px 80px rgba(0,0,0,0.25)', overflow: 'hidden', margin: 'auto'
+          }}>
+            {/* Modal header */}
+            <div style={{
+              padding: '16px 24px', borderBottom: '1px solid #F3F4F6',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: '#FAFAFA'
+            }}>
+              <div>
+                <p style={{ fontWeight: 700, fontSize: 16, margin: 0, color: '#111827' }}>{modalAd.ad_name}</p>
+                <p style={{ fontSize: 13, color: '#6B7280', margin: '2px 0 0' }}>{modalAd.campaign_name}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {modalAnalysis && (
+                  <div style={{
+                    background: scoreColor(modalAnalysis.overall_score),
+                    color: '#fff', borderRadius: 20, padding: '5px 16px',
+                    fontSize: 16, fontWeight: 700
+                  }}>{modalAnalysis.overall_score}/10</div>
+                )}
+                <button onClick={closeModal} style={{
+                  width: 32, height: 32, borderRadius: '50%', border: '1px solid #E5E7EB',
+                  background: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 700,
+                  color: '#6B7280', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>✕</button>
+              </div>
+            </div>
+
+            {/* Modal body */}
+            <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', minHeight: 500 }}>
+
+              {/* Left: creative preview + metrics */}
+              <div style={{ borderRight: '1px solid #F3F4F6', padding: 24, background: '#FAFAFA' }}>
+                {/* Big creative image */}
+                <div style={{
+                  width: '100%', aspectRatio: '9/16', maxHeight: 320,
+                  borderRadius: 12, overflow: 'hidden', marginBottom: 16,
+                  background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '1px solid #E5E7EB'
+                }}>
+                  {modalAd.thumbnail_url ? (
+                    <img src={modalAd.thumbnail_url} alt={modalAd.ad_name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={e => { (e.target as HTMLImageElement).src = '' }}
+                    />
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#9CA3AF' }}>
+                      <div style={{ fontSize: 40, marginBottom: 8 }}>🖼</div>
+                      <p style={{ fontSize: 12, margin: 0 }}>No preview available</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ad copy preview */}
+                {(modalAd.creative_title || modalAd.creative_body) && (
+                  <div style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 16, border: '1px solid #E5E7EB' }}>
+                    {modalAd.creative_title && <p style={{ fontWeight: 600, fontSize: 13, margin: '0 0 6px', color: '#111827' }}>{modalAd.creative_title}</p>}
+                    {modalAd.creative_body && <p style={{ fontSize: 12, color: '#374151', margin: 0, lineHeight: 1.6 }}>{modalAd.creative_body}</p>}
+                  </div>
+                )}
+
+                {/* Performance metrics */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                  {[
+                    { label: 'Spend', val: `₹${Number(modalAd.spend).toLocaleString('en-IN')}`, highlight: false },
+                    { label: 'CTR', val: `${Number(modalAd.ctr).toFixed(2)}%`, highlight: Number(modalAd.ctr) < 1 },
+                    { label: 'Installs', val: modalAd.installs || '—', highlight: false },
+                    { label: 'CPI', val: modalAd.installs ? `₹${Math.round(Number(modalAd.spend) / modalAd.installs)}` : '—', highlight: false },
+                    { label: 'Impressions', val: Number(modalAd.impressions).toLocaleString('en-IN'), highlight: false },
+                    { label: 'Clicks', val: Number(modalAd.clicks).toLocaleString('en-IN'), highlight: false },
+                  ].map(m => (
+                    <div key={m.label} style={{
+                      background: m.highlight ? '#FEF2F2' : '#fff',
+                      border: `1px solid ${m.highlight ? '#FECACA' : '#E5E7EB'}`,
+                      borderRadius: 8, padding: '8px 10px', textAlign: 'center'
+                    }}>
+                      <p style={{ fontSize: 11, color: m.highlight ? '#DC2626' : '#6B7280', margin: '0 0 2px' }}>{m.label}</p>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: m.highlight ? '#DC2626' : '#111827', margin: 0 }}>{String(m.val)}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* View in Ads Manager */}
+                <a href={`https://adsmanager.facebook.com/adsmanager/manage/ads?act=596746546417726&selected_ad_ids=${modalAd.ad_id}`}
+                  target="_blank" rel="noreferrer" style={{
+                    display: 'block', textAlign: 'center', fontSize: 13, fontWeight: 500,
+                    color: '#4F46E5', textDecoration: 'none', padding: '10px 0',
+                    border: '1.5px solid #6366F1', borderRadius: 8, background: '#EEF2FF'
+                  }}>View in Ads Manager →</a>
+              </div>
+
+              {/* Right: analysis + alternatives */}
+              <div style={{ padding: 24, overflowY: 'auto', maxHeight: '80vh' }}>
+                {modalAnalyzing && (
+                  <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🤖</div>
+                    <p style={{ fontSize: 15, color: '#6B7280', fontWeight: 500 }}>Claude is analysing this creative...</p>
+                    <p style={{ fontSize: 13, color: '#9CA3AF', margin: '6px 0 0' }}>Reviewing hook, CTA, audience fit and performance metrics</p>
+                  </div>
+                )}
+
+                {modalAnalysis && !modalAnalyzing && (
+                  <>
+                    {/* Summary */}
+                    <div style={{ marginBottom: 20 }}>
+                      <p style={{ fontWeight: 700, fontSize: 15, margin: '0 0 10px', color: '#111827' }}>Overall assessment</p>
+                      <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.7, margin: 0 }}>{modalAnalysis.summary}</p>
+                    </div>
+
+                    {/* Score breakdown */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+                      {[
+                        { label: 'Hook strength', val: modalAnalysis.hook_strength },
+                        { label: 'CTA effectiveness', val: modalAnalysis.cta_effectiveness },
+                        { label: 'Audience fit', val: modalAnalysis.audience_fit },
+                        { label: 'Tone', val: modalAnalysis.tone },
+                      ].map(row => {
+                        const isWeak = row.val.toLowerCase().startsWith('weak')
+                        const isMed = row.val.toLowerCase().startsWith('medium')
+                        const bg = isWeak ? '#FEF2F2' : isMed ? '#FFFBEB' : '#ECFDF5'
+                        const border = isWeak ? '#FECACA' : isMed ? '#FDE68A' : '#A7F3D0'
+                        const labelColor = isWeak ? '#DC2626' : isMed ? '#D97706' : '#059669'
+                        return (
+                          <div key={row.label} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px' }}>
+                            <p style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.label}</p>
+                            <p style={{ fontSize: 12, color: labelColor, fontWeight: 600, margin: '0 0 4px' }}>
+                              {row.val.startsWith('Weak') ? '⚠️ Weak' : row.val.startsWith('Medium') ? '🟡 Medium' : '✅ Strong'}
+                            </p>
+                            <p style={{ fontSize: 12, color: '#374151', margin: 0, lineHeight: 1.5 }}>{row.val.replace(/^(Weak|Medium|Strong)\s*—?\s*/i, '')}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Improvements */}
+                    {modalAnalysis.improvements?.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <p style={{ fontWeight: 700, fontSize: 15, margin: '0 0 12px', color: '#111827' }}>Issues to fix</p>
+                        {modalAnalysis.improvements.map((imp, i) => (
+                          <div key={i} style={{
+                            display: 'flex', gap: 10, marginBottom: 10,
+                            background: '#FFFBEB', border: '1px solid #FDE68A',
+                            borderRadius: 10, padding: '10px 14px'
+                          }}>
+                            <span style={{ color: '#D97706', fontWeight: 700, flexShrink: 0, fontSize: 14 }}>{i + 1}</span>
+                            <p style={{ fontSize: 13, color: '#374151', margin: 0, lineHeight: 1.6 }}>{imp}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Generate alternatives button */}
+                    {!modalAlternatives.length && !generatingAlts && (
+                      <button onClick={generateAlternatives} style={{
+                        width: '100%', padding: '14px 0',
+                        background: 'linear-gradient(135deg,#6366F1,#8B5CF6)',
+                        color: '#fff', border: 'none', borderRadius: 10,
+                        fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                        marginBottom: 24
+                      }}>
+                        ✨ Generate 3 alternative ads — fixing these issues
+                      </button>
+                    )}
+
+                    {generatingAlts && (
+                      <div style={{ textAlign: 'center', padding: '24px', background: '#F5F3FF', borderRadius: 10, marginBottom: 24 }}>
+                        <div style={{ fontSize: 28, marginBottom: 8 }}>⚡</div>
+                        <p style={{ fontSize: 14, color: '#4F46E5', fontWeight: 500, margin: 0 }}>Writing 3 improved alternatives...</p>
+                        <p style={{ fontSize: 12, color: '#7C3AED', margin: '4px 0 0' }}>Claude is addressing each issue highlighted above</p>
+                      </div>
+                    )}
+
+                    {/* Generated alternatives */}
+                    {modalAlternatives.length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                          <p style={{ fontWeight: 700, fontSize: 15, margin: 0, color: '#111827' }}>3 improved alternatives</p>
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#ECFDF5', color: '#059669', fontWeight: 600 }}>Issues addressed</span>
+                        </div>
+                        {modalAlternatives.map((v, i) => (
+                          <div key={i} style={{
+                            border: '1.5px solid #E5E7EB', borderRadius: 12, padding: 16, marginBottom: 12,
+                            background: '#FAFAFA'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <span style={{ fontWeight: 700, fontSize: 13, color: '#4F46E5' }}>Alt {v.variant}</span>
+                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#EEF2FF', color: '#4338CA', fontWeight: 500 }}>{v.format}</span>
+                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#F0FDF4', color: '#065F46', fontWeight: 500 }}>{v.angle}</span>
+                              </div>
+                              <button onClick={() => copyAlt(i, v)} style={{
+                                padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                                border: '1px solid #E5E7EB',
+                                background: copiedAlt === i ? '#F0FDF4' : '#fff',
+                                color: copiedAlt === i ? '#059669' : '#374151', cursor: 'pointer'
+                              }}>{copiedAlt === i ? '✅ Copied!' : 'Copy'}</button>
+                            </div>
+                            <div style={{ background: '#FFF7ED', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                              <p style={{ fontSize: 10, fontWeight: 700, color: '#C2410C', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hook</p>
+                              <p style={{ fontSize: 14, fontWeight: 700, color: '#1C1917', margin: 0 }}>{v.hook}</p>
+                            </div>
+                            <div style={{ background: '#F8FAFC', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                              <p style={{ fontSize: 10, fontWeight: 700, color: '#64748B', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Body</p>
+                              <p style={{ fontSize: 13, color: '#374151', margin: 0, lineHeight: 1.6 }}>{v.body}</p>
+                            </div>
+                            <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '8px 12px' }}>
+                              <p style={{ fontSize: 10, fontWeight: 700, color: '#065F46', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>CTA</p>
+                              <p style={{ fontSize: 14, fontWeight: 700, color: '#064E3B', margin: 0 }}>{v.cta}</p>
+                            </div>
+                          </div>
+                        ))}
+                        <button onClick={generateAlternatives} style={{
+                          width: '100%', padding: '10px 0', marginTop: 4,
+                          background: '#fff', color: '#6366F1',
+                          border: '1.5px solid #6366F1', borderRadius: 10,
+                          fontSize: 13, fontWeight: 600, cursor: 'pointer'
+                        }}>🔄 Regenerate alternatives</button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HEADER ── */}
       <div style={{
         background: '#fff', borderBottom: '1px solid #E5E7EB',
         padding: '0 24px', display: 'flex', alignItems: 'center',
@@ -201,7 +459,6 @@ export default function IntelligencePage() {
         {/* ── TAB 1: AD-LEVEL CREATIVE ANALYSIS ── */}
         {activeTab === 'analyze' && (
           <div>
-            {/* Date filter bar */}
             <div style={{
               background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10,
               padding: '12px 16px', marginBottom: 16,
@@ -218,39 +475,34 @@ export default function IntelligencePage() {
                 color: '#fff', border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer'
               }}>Refresh</button>
               <div style={{ flex: 1 }} />
-              <input
-                type="text" placeholder="Search ads..."
-                value={adSearch} onChange={e => setAdSearch(e.target.value)}
-                style={{ padding: '6px 12px', border: '1px solid #E5E7EB', borderRadius: 6, fontSize: 13, width: 200 }}
-              />
+              <input type="text" placeholder="Search ads..." value={adSearch} onChange={e => setAdSearch(e.target.value)}
+                style={{ padding: '6px 12px', border: '1px solid #E5E7EB', borderRadius: 6, fontSize: 13, width: 200 }} />
               <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filteredAds.length} ads</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: selectedAd || analyzing ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
-              {/* Ad list */}
-              <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, overflow: 'hidden' }}>
-                {loadingAds ? (
-                  <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9CA3AF' }}>
-                    <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
-                    <p style={{ fontSize: 14, margin: 0 }}>Loading ads from Meta Ads Manager...</p>
-                  </div>
-                ) : filteredAds.length === 0 ? (
-                  <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9CA3AF' }}>
-                    <p style={{ fontSize: 14, margin: 0 }}>No ads found for this period</p>
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13 }}>
+            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, overflow: 'hidden' }}>
+              {loadingAds ? (
+                <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9CA3AF' }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+                  <p style={{ fontSize: 14, margin: 0 }}>Loading ads from Meta Ads Manager...</p>
+                </div>
+              ) : filteredAds.length === 0 ? (
+                <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9CA3AF' }}>
+                  <p style={{ fontSize: 14, margin: 0 }}>No ads found for this period</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', minWidth: 750, borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #F3F4F6', background: '#F9FAFB' }}>
                         {[
-                          { label: 'Ad name', width: 220 },
-                          { label: 'Campaign', width: 150 },
-                          { label: 'Spend', width: 90 },
+                          { label: 'Ad name', width: 260 },
+                          { label: 'Campaign', width: 160 },
+                          { label: 'Spend', width: 100 },
                           { label: 'CTR', width: 70 },
                           { label: 'Installs', width: 80 },
                           { label: 'CPI', width: 70 },
-                          { label: 'Analyse', width: 110 },
+                          { label: '', width: 120 },
                         ].map(h => (
                           <th key={h.label} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12, minWidth: h.width }}>{h.label}</th>
                         ))}
@@ -258,156 +510,60 @@ export default function IntelligencePage() {
                     </thead>
                     <tbody>
                       {filteredAds.map(ad => (
-                        <tr key={ad.ad_id} style={{
-                          borderBottom: '1px solid #F3F4F6',
-                          background: selectedAd?.ad_id === ad.ad_id ? '#EEF2FF' : 'transparent'
-                        }}>
-                          <td style={{ padding: '10px 12px', maxWidth: 220 }}>
+                        <tr key={ad.ad_id} style={{ borderBottom: '1px solid #F3F4F6' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#F9FAFB')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                          <td style={{ padding: '10px 12px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               {ad.thumbnail_url ? (
-                                <img src={ad.thumbnail_url} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: '1px solid #E5E7EB' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                <img src={ad.thumbnail_url} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: '1px solid #E5E7EB' }}
+                                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                               ) : (
                                 <div style={{ width: 44, height: 44, borderRadius: 6, background: '#F3F4F6', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🖼</div>
                               )}
                               <div style={{ minWidth: 0 }}>
-                                <p style={{ margin: 0, fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.ad_name}</p>
-                                {ad.creative_body && <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9CA3AF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.creative_body.slice(0, 50)}...</p>}
+                                <p style={{ margin: 0, fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{ad.ad_name}</p>
+                                {ad.creative_body && <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9CA3AF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{ad.creative_body.slice(0, 50)}...</p>}
                               </div>
                             </div>
                           </td>
-                          <td style={{ padding: '10px 12px', color: '#6B7280', fontSize: 12, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.campaign_name}</td>
-                          <td style={{ padding: '10px 12px', fontWeight: 500 }}>₹{Number(ad.spend).toLocaleString('en-IN')}</td>
-                          <td style={{ padding: '10px 12px' }}>{Number(ad.ctr).toFixed(2)}%</td>
+                          <td style={{ padding: '10px 12px', color: '#6B7280', fontSize: 12, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.campaign_name}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: 600 }}>₹{Number(ad.spend).toLocaleString('en-IN')}</td>
+                          <td style={{ padding: '10px 12px', color: Number(ad.ctr) < 1 ? '#DC2626' : '#059669', fontWeight: 600 }}>{Number(ad.ctr).toFixed(2)}%</td>
                           <td style={{ padding: '10px 12px', fontWeight: 500 }}>{ad.installs || '—'}</td>
                           <td style={{ padding: '10px 12px' }}>{ad.installs ? `₹${Math.round(Number(ad.spend) / ad.installs)}` : '—'}</td>
                           <td style={{ padding: '10px 12px' }}>
-                            <button onClick={() => runAnalysis(ad)} style={{
-                              padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
-                              border: '1px solid #6366F1', background: '#EEF2FF',
-                              color: '#4F46E5', cursor: 'pointer'
+                            <button onClick={() => openModal(ad)} style={{
+                              padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                              border: '1.5px solid #6366F1', background: '#EEF2FF',
+                              color: '#4F46E5', cursor: 'pointer', whiteSpace: 'nowrap'
                             }}>Analyse →</button>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Analysis panel */}
-              <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: 20 }}>
-                {!selectedAd && !analyzing && (
-                  <div style={{ textAlign: 'center', padding: '40px 16px', color: '#9CA3AF' }}>
-                    <div style={{ fontSize: 36, marginBottom: 10 }}>📊</div>
-                    <p style={{ fontSize: 14, margin: 0 }}>Click "Analyse →" on any ad</p>
-                    <p style={{ fontSize: 12, margin: '6px 0 0', lineHeight: 1.5 }}>Claude will review the copy, hook, CTA and give a score with specific improvements</p>
-                  </div>
-                )}
-                {analyzing && (
-                  <div style={{ textAlign: 'center', padding: '40px 16px' }}>
-                    <div style={{ fontSize: 32, marginBottom: 10 }}>🤖</div>
-                    <p style={{ fontSize: 14, color: '#6B7280' }}>Analysing creative...</p>
-                    <p style={{ fontSize: 12, color: '#9CA3AF', margin: '4px 0 0' }}>{selectedAd?.ad_name}</p>
-                  </div>
-                )}
-                {selectedAd && analysisResult && !analyzing && (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-                      <div>
-                        <p style={{ fontWeight: 600, fontSize: 14, margin: '0 0 2px', color: '#111827' }}>{selectedAd.ad_name}</p>
-                        <p style={{ fontSize: 12, color: '#6B7280', margin: 0 }}>{selectedAd.campaign_name}</p>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-                        <div style={{
-                          background: scoreColor(analysisResult.overall_score),
-                          color: '#fff', borderRadius: 20, padding: '4px 14px',
-                          fontSize: 15, fontWeight: 700
-                        }}>{analysisResult.overall_score}/10</div>
-                        <button onClick={() => { setSelectedAd(null); setAnalysisResult(null) }} style={{
-                          width: 28, height: 28, borderRadius: '50%', border: '1px solid #E5E7EB',
-                          background: '#F9FAFB', cursor: 'pointer', fontSize: 14,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          color: '#6B7280', fontWeight: 600
-                        }}>✕</button>
-                      </div>
-                    </div>
-
-                    {/* Perf metrics row */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-                      {[
-                        { label: 'Spend', val: `₹${Number(selectedAd.spend).toLocaleString('en-IN')}` },
-                        { label: 'CTR', val: `${Number(selectedAd.ctr).toFixed(2)}%` },
-                        { label: 'Installs', val: selectedAd.installs || '—' },
-                      ].map(m => (
-                        <div key={m.label} style={{ background: '#F9FAFB', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
-                          <p style={{ fontSize: 11, color: '#9CA3AF', margin: '0 0 2px' }}>{m.label}</p>
-                          <p style={{ fontSize: 14, fontWeight: 600, color: '#111827', margin: 0 }}>{m.val}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 12 }}>{analysisResult.summary}</p>
-
-                    {[
-                      { label: 'Hook strength', val: analysisResult.hook_strength },
-                      { label: 'CTA effectiveness', val: analysisResult.cta_effectiveness },
-                      { label: 'Audience fit', val: analysisResult.audience_fit },
-                      { label: 'Tone', val: analysisResult.tone },
-                    ].map(row => (
-                      <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid #F3F4F6' }}>
-                        <span style={{ fontSize: 12, color: '#6B7280' }}>{row.label}</span>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: '#374151', maxWidth: 220, textAlign: 'right' }}>{row.val}</span>
-                      </div>
-                    ))}
-
-                    {analysisResult.improvements?.length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Improvements</p>
-                        {analysisResult.improvements.map((imp, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
-                            <span style={{ color: '#F59E0B', flexShrink: 0, fontSize: 12 }}>→</span>
-                            <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{imp}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {selectedAd.ad_id && (
-                      <a href={`https://adsmanager.facebook.com/adsmanager/manage/ads?act=596746546417726&selected_ad_ids=${selectedAd.ad_id}`} target="_blank" rel="noreferrer" style={{
-                        display: 'block', marginTop: 12, textAlign: 'center', fontSize: 12,
-                        color: '#4F46E5', textDecoration: 'none', padding: '6px 0',
-                        border: '1px solid #E5E7EB', borderRadius: 6
-                      }}>View in Ads Manager →</a>
-                    )}
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* ── TAB 2: COMPETITOR ANALYSIS ── */}
+        {/* ── TAB 2: COMPETITOR ── */}
         {activeTab === 'competitor' && (
-          <div style={{
-            background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB',
-            padding: 48, textAlign: 'center'
-          }}>
+          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: 48, textAlign: 'center' }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>🔒</div>
             <p style={{ fontWeight: 600, fontSize: 16, margin: '0 0 8px' }}>Meta Ad Library API — pending access</p>
             <p style={{ fontSize: 14, color: '#6B7280', maxWidth: 480, margin: '0 auto 20px' }}>
               Competitor ad intelligence requires Meta Ad Library API approval. Form submitted and pending.
-              Meanwhile, browse competitor ads manually and screenshot them for analysis.
+              Meanwhile, browse competitor ads manually below.
             </p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
               {['Porter', 'Shadowfax', 'Delhivery', 'Dunzo', 'Borzo'].map(b => (
-                <a key={b}
-                  href={`https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IN&q=${b}&search_type=keyword_unordered`}
-                  target="_blank" rel="noreferrer"
-                  style={{
+                <a key={b} href={`https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IN&q=${b}&search_type=keyword_unordered`}
+                  target="_blank" rel="noreferrer" style={{
                     padding: '8px 16px', borderRadius: 8, border: '1px solid #E5E7EB',
-                    fontSize: 13, color: '#374151', textDecoration: 'none',
-                    background: '#F9FAFB', fontWeight: 500
+                    fontSize: 13, color: '#374151', textDecoration: 'none', background: '#F9FAFB', fontWeight: 500
                   }}>View {b} ads →</a>
               ))}
             </div>
@@ -422,10 +578,7 @@ export default function IntelligencePage() {
               <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 20px' }}>Fill brief → Claude writes 3 ad variants</p>
 
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>Campaign objective</label>
-              <select value={objective} onChange={e => setObjective(e.target.value)} style={{
-                width: '100%', padding: '9px 12px', border: '1px solid #E5E7EB',
-                borderRadius: 8, fontSize: 13, marginBottom: 14, color: '#374151'
-              }}>
+              <select value={objective} onChange={e => setObjective(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, marginBottom: 14, color: '#374151' }}>
                 <option>First order conversion</option>
                 <option>App install — delivery partner</option>
                 <option>Partner activation (earn more)</option>
@@ -436,10 +589,7 @@ export default function IntelligencePage() {
               </select>
 
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>Target audience</label>
-              <select value={audience} onChange={e => setAudience(e.target.value)} style={{
-                width: '100%', padding: '9px 12px', border: '1px solid #E5E7EB',
-                borderRadius: 8, fontSize: 13, marginBottom: 14, color: '#374151'
-              }}>
+              <select value={audience} onChange={e => setAudience(e.target.value)} style={{ width: '100%', padding: '9px 12px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, marginBottom: 14, color: '#374151' }}>
                 <option>3-wheeler / EV operators</option>
                 <option>Two-wheeler delivery partners</option>
                 <option>Fleet owners (5+ vehicles)</option>
@@ -450,14 +600,8 @@ export default function IntelligencePage() {
               </select>
 
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>Key offer / USP *</label>
-              <textarea value={offer} onChange={e => setOffer(e.target.value)}
-                placeholder="e.g. ₹250/delivery, 3 orders pehle ₹300 cashback..."
-                style={{
-                  width: '100%', minHeight: 80, padding: '9px 12px',
-                  border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13,
-                  resize: 'vertical', fontFamily: 'inherit', color: '#374151',
-                  marginBottom: 14, boxSizing: 'border-box', outline: 'none'
-                }} />
+              <textarea value={offer} onChange={e => setOffer(e.target.value)} placeholder="e.g. ₹250/delivery, 3 orders pehle ₹300 cashback..."
+                style={{ width: '100%', minHeight: 80, padding: '9px 12px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, resize: 'vertical', fontFamily: 'inherit', color: '#374151', marginBottom: 14, boxSizing: 'border-box', outline: 'none' }} />
 
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Tone</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
@@ -471,35 +615,15 @@ export default function IntelligencePage() {
                 ))}
               </div>
 
-              {/* Reference creative */}
-              <div style={{
-                background: '#FFFBEB', border: '1px solid #FDE68A',
-                borderRadius: 10, padding: 14, marginBottom: 16
-              }}>
-                <p style={{ fontSize: 12, fontWeight: 600, color: '#92400E', margin: '0 0 4px' }}>
-                  📎 Reference creative (optional)
-                </p>
-                <p style={{ fontSize: 12, color: '#B45309', margin: '0 0 10px', lineHeight: 1.5 }}>
-                  Give Claude a reference ad — it will match its style, language, and angle exactly
-                </p>
-                <div onClick={() => refInputRef.current?.click()} style={{
-                  border: '1px dashed #FCD34D', borderRadius: 8, padding: '10px 14px',
-                  cursor: 'pointer', marginBottom: 8, background: refImage ? '#F0FDF4' : '#FFFEF7', textAlign: 'center'
-                }}>
+              <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: '#92400E', margin: '0 0 4px' }}>📎 Reference creative (optional)</p>
+                <p style={{ fontSize: 12, color: '#B45309', margin: '0 0 10px', lineHeight: 1.5 }}>Give Claude a reference ad — it will match its style, language, and angle exactly</p>
+                <div onClick={() => refInputRef.current?.click()} style={{ border: '1px dashed #FCD34D', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', marginBottom: 8, background: refImage ? '#F0FDF4' : '#FFFEF7', textAlign: 'center' }}>
                   <input ref={refInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleRefUpload} />
-                  {refImage
-                    ? <span style={{ fontSize: 12, color: '#059669', fontWeight: 500 }}>✅ {refImageName} — Click to replace</span>
-                    : <span style={{ fontSize: 12, color: '#92400E' }}>📁 Upload reference image</span>
-                  }
+                  {refImage ? <span style={{ fontSize: 12, color: '#059669', fontWeight: 500 }}>✅ {refImageName} — Click to replace</span> : <span style={{ fontSize: 12, color: '#92400E' }}>📁 Upload reference image</span>}
                 </div>
-                <textarea value={refCreative} onChange={e => setRefCreative(e.target.value)}
-                  placeholder="Or paste reference ad copy here..."
-                  style={{
-                    width: '100%', minHeight: 70, padding: '8px 10px',
-                    border: '1px solid #FDE68A', borderRadius: 8, fontSize: 12,
-                    resize: 'vertical', fontFamily: 'inherit', color: '#374151',
-                    boxSizing: 'border-box', background: '#FFFEF7', outline: 'none'
-                  }} />
+                <textarea value={refCreative} onChange={e => setRefCreative(e.target.value)} placeholder="Or paste reference ad copy here..."
+                  style={{ width: '100%', minHeight: 70, padding: '8px 10px', border: '1px solid #FDE68A', borderRadius: 8, fontSize: 12, resize: 'vertical', fontFamily: 'inherit', color: '#374151', boxSizing: 'border-box', background: '#FFFEF7', outline: 'none' }} />
               </div>
 
               <button onClick={generateScripts} disabled={generating || !offer} style={{
@@ -508,22 +632,15 @@ export default function IntelligencePage() {
                 color: generating || !offer ? '#9CA3AF' : '#fff',
                 border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600,
                 cursor: generating || !offer ? 'not-allowed' : 'pointer'
-              }}>
-                {generating ? '⏳ Generating...' : '✨ Generate 3 ad scripts'}
-              </button>
+              }}>{generating ? '⏳ Generating...' : '✨ Generate 3 ad scripts'}</button>
             </div>
 
             <div>
               {!scripts.length && !generating && (
-                <div style={{
-                  background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB',
-                  padding: '60px 24px', textAlign: 'center'
-                }}>
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '60px 24px', textAlign: 'center' }}>
                   <div style={{ fontSize: 40, marginBottom: 12 }}>✍️</div>
                   <p style={{ fontSize: 14, color: '#6B7280', margin: 0 }}>Fill the brief and click generate</p>
-                  <p style={{ fontSize: 12, color: '#9CA3AF', margin: '6px 0 0' }}>
-                    Add a reference creative to guide Claude's style and angle
-                  </p>
+                  <p style={{ fontSize: 12, color: '#9CA3AF', margin: '6px 0 0' }}>Add a reference creative to guide Claude's style and angle</p>
                 </div>
               )}
               {generating && (
@@ -540,11 +657,7 @@ export default function IntelligencePage() {
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#EEF2FF', color: '#4338CA', fontWeight: 500 }}>{v.format}</span>
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#F0FDF4', color: '#065F46', fontWeight: 500 }}>{v.angle}</span>
                     </div>
-                    <button onClick={() => copyScript(i, v)} style={{
-                      padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500,
-                      border: '1px solid #E5E7EB', background: copiedIdx === i ? '#F0FDF4' : '#fff',
-                      color: copiedIdx === i ? '#059669' : '#374151', cursor: 'pointer'
-                    }}>{copiedIdx === i ? '✅ Copied!' : 'Copy'}</button>
+                    <button onClick={() => copyScript(i, v)} style={{ padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 500, border: '1px solid #E5E7EB', background: copiedIdx === i ? '#F0FDF4' : '#fff', color: copiedIdx === i ? '#059669' : '#374151', cursor: 'pointer' }}>{copiedIdx === i ? '✅ Copied!' : 'Copy'}</button>
                   </div>
                   <div style={{ background: '#FFF7ED', borderRadius: 8, padding: '10px 14px', marginBottom: 10 }}>
                     <p style={{ fontSize: 11, fontWeight: 600, color: '#C2410C', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Hook (first 3 seconds)</p>
