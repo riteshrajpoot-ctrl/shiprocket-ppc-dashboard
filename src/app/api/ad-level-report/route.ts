@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
         // Use batch request
         const batchReqs = batch.map((id: string) => ({
           method: 'GET',
-          relative_url: `${id}?fields=creative{body,title,effective_object_story_id,thumbnail_url,object_story_spec}`
+          relative_url: `${id}?fields=creative{body,title,thumbnail_url,object_story_spec}`
         }))
 
         const batchRes = await fetch(`https://graph.facebook.com/v19.0/?batch=${encodeURIComponent(JSON.stringify(batchReqs))}&access_token=${token}&include_headers=false`, {
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
                 creativeMap[batch[idx]] = {
                   body: creative.body || creative.object_story_spec?.link_data?.message || '',
                   title: creative.title || creative.object_story_spec?.link_data?.name || '',
-                  snapshot_url: `https://www.facebook.com/ads/archive/render_ad/?id=${batch[idx]}&access_token=${token}`
+                  snapshot_url: creative.thumbnail_url || ''
                 }
               } catch {}
             }
