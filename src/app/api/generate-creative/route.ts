@@ -1,72 +1,97 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function POST(request: Request) {
-  const { objective, audience, offer, tone } = await request.json()
-
+export async function POST(req: NextRequest) {
+  const { objective, audience, offer, tone, refCreative, refImage } = await req.json()
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'Missing ANTHROPIC_API_KEY' }, { status: 500 })
+  if (!apiKey) return NextResponse.json({ error: 'Missing API key' }, { status: 500 })
 
-  const prompt = `You are an expert performance marketing copywriter specializing in Indian D2C and gig economy apps.
+  const contentBlocks: any[] = []
 
-Write 3 Meta ad script variants for Shiprocket Quick with these details:
+  if (refImage) {
+    contentBlocks.push({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: refImage }
+    })
+  }
+
+  const refSection = refCreative || refImage
+    ? `\nREFERENCE CREATIVE PROVIDED:${refImage ? ' (see image above)' : ''}${refCreative ? `\n"${refCreative}"` : ''}
+
+Study this reference carefully — match its:
+- Language style and Hinglish ratio
+- Copy length and sentence structure  
+- Emotional angle and messaging approach
+- Whether it is supply-side (partner/earning focused) or demand-side (customer/order focused)
+Write new variants that feel like they come from the same creative family.`
+    : `\nNo reference provided — write in natural Hinglish suited to the audience.`
+
+  const prompt = `You are a senior performance creative strategist at Shiprocket.
+
+Brief:
 - Objective: ${objective}
 - Target audience: ${audience}
 - Key offer/USP: ${offer}
 - Tone: ${tone}
+${refSection}
 
-Each variant should be for a different format and use a different creative angle.
+Write 3 distinct ad script variants. Each must:
+1. Match the reference style and angle if provided (supply-side OR demand-side — follow the reference)
+2. Use natural Hinglish
+3. Have a punchy hook under 10 words
+4. Each variant should have a genuinely different angle
 
-Respond ONLY with a valid JSON object (no markdown, no backticks):
+Return ONLY valid JSON, no markdown:
 {
   "variants": [
     {
+      "variant": 1,
       "format": "Video ad",
-      "angle": "Fear of missing out",
-      "hook": "First 3 seconds of video script — must stop the scroll immediately",
-      "body": "Full ad body copy — conversational, benefit-focused, 3-4 lines max",
-      "cta": "Clear call to action text"
+      "angle": "<angle name>",
+      "hook": "<hook text>",
+      "body": "<body copy 2-3 sentences>",
+      "cta": "<CTA text>"
     },
     {
+      "variant": 2,
       "format": "Carousel ad",
-      "angle": "Social proof",
-      "hook": "First card headline",
-      "body": "Cards 2-4 copy — each card one benefit",
-      "cta": "Last card CTA"
+      "angle": "<angle name>",
+      "hook": "<hook text>",
+      "body": "<body copy>",
+      "cta": "<CTA text>"
     },
     {
-      "format": "Static image ad",
-      "angle": "Direct offer",
-      "hook": "Bold headline for the image",
-      "body": "Supporting copy below the image",
-      "cta": "Button text"
+      "variant": 3,
+      "format": "Static image",
+      "angle": "<angle name>",
+      "hook": "<hook text>",
+      "body": "<body copy>",
+      "cta": "<CTA text>"
     }
   ]
-}
+}`
 
-Write in Hinglish where natural (mix of Hindi and English) since the audience is Indian. Keep hooks punchy and under 10 words.`
+  contentBlocks.push({ type: 'text', text: prompt })
 
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: contentBlocks }],
+    }),
+  })
+
+  const data = await res.json()
+  const text = data.content?.[0]?.text || '{}'
+  const clean = text.replace(/```json|```/g, '').trim()
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-
-    const data = await res.json()
-    const text = data.content?.[0]?.text || '{}'
-    const clean = text.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(clean)
-    return NextResponse.json(parsed)
-
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json(JSON.parse(clean))
+  } catch {
+    return NextResponse.json({ error: 'Parse failed', raw: text }, { status: 500 })
   }
 }
