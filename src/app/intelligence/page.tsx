@@ -262,9 +262,18 @@ export default function IntelligencePage() {
                           borderBottom: '1px solid #F3F4F6',
                           background: selectedAd?.ad_id === ad.ad_id ? '#EEF2FF' : 'transparent'
                         }}>
-                          <td style={{ padding: '10px 12px', maxWidth: 200 }}>
-                            <p style={{ margin: 0, fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.ad_name}</p>
-                            {ad.creative_body && <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9CA3AF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.creative_body.slice(0, 60)}...</p>}
+                          <td style={{ padding: '10px 12px', maxWidth: 220 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              {ad.thumbnail_url ? (
+                                <img src={ad.thumbnail_url} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: '1px solid #E5E7EB' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                              ) : (
+                                <div style={{ width: 44, height: 44, borderRadius: 6, background: '#F3F4F6', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🖼</div>
+                              )}
+                              <div style={{ minWidth: 0 }}>
+                                <p style={{ margin: 0, fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.ad_name}</p>
+                                {ad.creative_body && <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9CA3AF', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.creative_body.slice(0, 50)}...</p>}
+                              </div>
+                            </div>
                           </td>
                           <td style={{ padding: '10px 12px', color: '#6B7280', fontSize: 12, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.campaign_name}</td>
                           <td style={{ padding: '10px 12px', fontWeight: 500 }}>₹{Number(ad.spend).toLocaleString('en-IN')}</td>
@@ -309,11 +318,19 @@ export default function IntelligencePage() {
                         <p style={{ fontWeight: 600, fontSize: 14, margin: '0 0 2px', color: '#111827' }}>{selectedAd.ad_name}</p>
                         <p style={{ fontSize: 12, color: '#6B7280', margin: 0 }}>{selectedAd.campaign_name}</p>
                       </div>
-                      <div style={{
-                        background: scoreColor(analysisResult.overall_score),
-                        color: '#fff', borderRadius: 20, padding: '4px 14px',
-                        fontSize: 15, fontWeight: 700, flexShrink: 0
-                      }}>{analysisResult.overall_score}/10</div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                        <div style={{
+                          background: scoreColor(analysisResult.overall_score),
+                          color: '#fff', borderRadius: 20, padding: '4px 14px',
+                          fontSize: 15, fontWeight: 700
+                        }}>{analysisResult.overall_score}/10</div>
+                        <button onClick={() => { setSelectedAd(null); setAnalysisResult(null) }} style={{
+                          width: 28, height: 28, borderRadius: '50%', border: '1px solid #E5E7EB',
+                          background: '#F9FAFB', cursor: 'pointer', fontSize: 14,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: '#6B7280', fontWeight: 600
+                        }}>✕</button>
+                      </div>
                     </div>
 
                     {/* Perf metrics row */}
@@ -356,12 +373,12 @@ export default function IntelligencePage() {
                       </div>
                     )}
 
-                    {selectedAd.ad_snapshot_url && (
-                      <a href={selectedAd.ad_snapshot_url} target="_blank" rel="noreferrer" style={{
+                    {selectedAd.ad_id && (
+                      <a href={`https://adsmanager.facebook.com/adsmanager/manage/ads?act=596746546417726&selected_ad_ids=${selectedAd.ad_id}`} target="_blank" rel="noreferrer" style={{
                         display: 'block', marginTop: 12, textAlign: 'center', fontSize: 12,
                         color: '#4F46E5', textDecoration: 'none', padding: '6px 0',
                         border: '1px solid #E5E7EB', borderRadius: 6
-                      }}>View ad creative →</a>
+                      }}>View in Ads Manager →</a>
                     )}
                   </div>
                 )}
