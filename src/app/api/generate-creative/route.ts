@@ -25,7 +25,7 @@ Study this reference carefully — match its:
 Write new variants that feel like they come from the same creative family.`
     : `\nNo reference provided — write in natural Hinglish suited to the audience.`
 
-  const prompt = `You are a senior performance creative strategist at Shiprocket.
+  const prompt = `You are a top performance creative writer for Shiprocket Quick — India's on-demand 3-wheeler delivery app.
 
 Brief:
 - Objective: ${objective}
@@ -34,11 +34,14 @@ Brief:
 - Tone: ${tone}
 ${refSection}
 
-Write 3 distinct ad script variants. Each must:
-1. Match the reference style and angle if provided (supply-side OR demand-side — follow the reference)
-2. Use natural Hinglish
-3. Have a punchy hook under 10 words
-4. Each variant should have a genuinely different angle
+STRICT RULES:
+1. Hook: MAX 8 words. Must create instant curiosity or urgency. No generic phrases like "Earn money" or "Join us"
+2. Body: MAX 2 short sentences. One problem, one solution. No fluff.
+3. CTA: 3-5 words max. Action verb first. e.g. "Abhi Download Karo", "Book First Ride", "Partner Bano Aaj"
+4. Hinglish: Mix Hindi + English naturally like real conversations, not forced translation
+5. Each variant must have a GENUINELY different angle and emotional trigger
+6. Never mention "1-Wheeler" — always "3-Wheeler" for vehicle type
+7. Be specific with numbers if offer has them (₹250, 3 orders, etc.)
 
 Return ONLY valid JSON, no markdown:
 {
@@ -46,26 +49,26 @@ Return ONLY valid JSON, no markdown:
     {
       "variant": 1,
       "format": "Video ad",
-      "angle": "<angle name>",
-      "hook": "<hook text>",
-      "body": "<body copy 2-3 sentences>",
-      "cta": "<CTA text>"
+      "angle": "<2-3 word angle name>",
+      "hook": "<max 8 words>",
+      "body": "<max 2 sentences>",
+      "cta": "<3-5 words>"
     },
     {
       "variant": 2,
       "format": "Carousel ad",
-      "angle": "<angle name>",
-      "hook": "<hook text>",
-      "body": "<body copy>",
-      "cta": "<CTA text>"
+      "angle": "<2-3 word angle name>",
+      "hook": "<max 8 words>",
+      "body": "<max 2 sentences>",
+      "cta": "<3-5 words>"
     },
     {
       "variant": 3,
       "format": "Static image",
-      "angle": "<angle name>",
-      "hook": "<hook text>",
-      "body": "<body copy>",
-      "cta": "<CTA text>"
+      "angle": "<2-3 word angle name>",
+      "hook": "<max 8 words>",
+      "body": "<max 2 sentences>",
+      "cta": "<3-5 words>"
     }
   ]
 }`
