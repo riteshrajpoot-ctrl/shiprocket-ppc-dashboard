@@ -1,113 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
-  const { variant, adName, issues, campaignContext, referenceImageUrl } = await req.json()
+  const { variant, adName, campaignContext, referenceImageUrl } = await req.json()
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 })
 
-  const hookText = variant?.hook || ''
-  const ctaText = variant?.cta || ''
+  const hook = variant?.hook || ''
+  const cta = variant?.cta || ''
+  const angle = variant?.angle || ''
 
-  // Illustrated style prompt (matches Shiprocket Quick cartoon brand style)
-  const illustratedPrompt = `A square mobile ad creative for Shiprocket Quick, Indian on-demand 3-wheeler delivery app.
-Style: Flat vector illustration / cartoon style. Bold, colorful, NOT photorealistic.
-Background: Bright yellow (#FFD000) with simple graphic shapes.
-Main character: Friendly cartoon Indian auto-rickshaw (3-wheeler) driver in yellow branded uniform, smiling, confident pose.
-Vehicle: Yellow cartoon 3-wheeler auto-rickshaw beside the driver.
-Text layout:
-  - Top-left: Small rounded white pill with "Shiprocket Quick" purple text
-  - Center: Bold white text reading exactly: ${hookText}
-  - Bottom-center: Rounded purple (#6B21A8) button with white text: ${ctaText}
-Design rules:
-  - Only yellow and purple brand colors
-  - Clean readable typography, large font for hook
-  - CTA button looks tappable, rounded corners
-  - No extra random text anywhere
-  - Cartoon illustration like Swiggy or Zomato brand ads
-  - Square 1:1 format`
+  const prompt = `Square mobile ad creative for "Shiprocket Quick" — Indian on-demand 3-wheeler delivery app.
 
-  // Style reference prompt (when we have a reference image)  
-  const referencePrompt = `Create a new mobile ad creative in the EXACT same visual style as the reference image.
-Match: illustration style, color palette, layout structure, character style, logo placement.
-Only change the text content:
-  - Hook text: ${hookText}
-  - CTA button text: ${ctaText}
-Keep everything else identical to the reference — same cartoon style, same brand colors, same composition.`
+STYLE: Flat vector cartoon illustration. Bold, colorful. NOT photorealistic. Similar to Swiggy/Zomato illustrated ads.
 
-  try {
-    // Try image edit with reference first
-    if (referenceImageUrl) {
-      try {
-        const imgRes = await fetch(referenceImageUrl)
-        const imgBuffer = await imgRes.arrayBuffer()
-        const imgBase64 = Buffer.from(imgBuffer).toString('base64')
-        const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
+COMPOSITION:
+- Bright yellow (#FFD000) background with simple geometric shapes
+- Center: Friendly cartoon Indian auto-rickshaw driver in yellow Shiprocket Quick branded t-shirt, smiling, thumbs up pose
+- Right side: Yellow cartoon 3-wheeler auto-rickshaw vehicle
+- Top-left corner: Small white rounded rectangle with purple "Shiprocket Quick" text
 
-        const { default: FormData } = await import('form-data')
-        const form = new FormData()
-        form.append('model', 'gpt-image-1')
-        form.append('prompt', referencePrompt)
-        form.append('n', '1')
-        form.append('size', '1024x1024')
-        form.append('quality', 'high')
-        form.append('image', Buffer.from(imgBase64, 'base64'), {
-          filename: 'reference.jpg',
-          contentType: mimeType,
-        })
+TEXT ON IMAGE (exact text, clean typography):
+- Large bold white text center-top: "${hook}"
+- Bottom-center: Rounded purple (#6B21A8) pill button, white text: "${cta}"
 
-        const editRes = await fetch('https://api.openai.com/v1/images/edits', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            ...form.getHeaders(),
-          },
-          body: form,
-        })
+RULES:
+- Only yellow and purple colors
+- No extra text anywhere else
+- CTA button must look like a real rounded button
+- Clean professional ad layout
+- Angle/mood: ${angle}`
 
-        const editData = await editRes.json()
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      quality: 'high',
+    }),
+  })
 
-        if (!editData.error) {
-          const b64 = editData.data?.[0]?.b64_json
-          const url = editData.data?.[0]?.url
-          const image = b64 ? `data:image/png;base64,${b64}` : url
-          if (image) {
-            return NextResponse.json({ image })
-          }
-        }
-      } catch (_e) {
-        // fall through to standard generation
-      }
-    }
+  const data = await res.json()
 
-    // Standard generation fallback
-    const genRes = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: illustratedPrompt,
-        n: 1,
-        size: '1024x1024',
-        quality: 'high',
-      }),
-    })
-
-    const genData = await genRes.json()
-
-    if (genData.error) {
-      return NextResponse.json({ error: genData.error.message }, { status: 400 })
-    }
-
-    const b64 = genData.data?.[0]?.b64_json
-    const url = genData.data?.[0]?.url
-    const image = b64 ? `data:image/png;base64,${b64}` : url
-
-    return NextResponse.json({ image })
-
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  if (data.error) {
+    return NextResponse.json({ error: data.error.message }, { status: 400 })
   }
+
+  const b64 = data.data?.[0]?.b64_json
+  const url = data.data?.[0]?.url
+  const image = b64 ? `data:image/png;base64,${b64}` : url
+
+  return NextResponse.json({ image })
 }
