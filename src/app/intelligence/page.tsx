@@ -226,7 +226,7 @@ export default function IntelligencePage() {
               <span style={{ fontSize: 12, color: '#9CA3AF' }}>{filteredAds.length} ads</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 16, alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: selectedAd || analyzing ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
               {/* Ad list */}
               <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, overflow: 'hidden' }}>
                 {loadingAds ? (
@@ -239,11 +239,20 @@ export default function IntelligencePage() {
                     <p style={{ fontSize: 14, margin: 0 }}>No ads found for this period</p>
                   </div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #F3F4F6', background: '#F9FAFB' }}>
-                        {['Ad name', 'Campaign', 'Spend', 'CTR', 'Installs', 'CPI', 'Analyse'].map(h => (
-                          <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>{h}</th>
+                        {[
+                          { label: 'Ad name', width: 220 },
+                          { label: 'Campaign', width: 150 },
+                          { label: 'Spend', width: 90 },
+                          { label: 'CTR', width: 70 },
+                          { label: 'Installs', width: 80 },
+                          { label: 'CPI', width: 70 },
+                          { label: 'Analyse', width: 110 },
+                        ].map(h => (
+                          <th key={h.label} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12, minWidth: h.width }}>{h.label}</th>
                         ))}
                       </tr>
                     </thead>
@@ -273,6 +282,7 @@ export default function IntelligencePage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
 
