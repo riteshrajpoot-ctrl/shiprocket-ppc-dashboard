@@ -9,6 +9,9 @@ interface AdReport {
   ad_name: string
   campaign_name: string
   adset_name: string
+  page_name: string
+  ad_side: string
+  store_url: string
   spend: string
   impressions: string
   clicks: string
@@ -132,52 +135,56 @@ export default function IntelligencePage() {
     setGeneratingImage(null)
   }
 
+  const detectAdSide = (ad: AdReport): 'DEMAND' | 'SUPPLY' => {
+    // Use app store URL as source of truth
+    // com.shiprocket.quickpartner = Supply-side (driver app)
+    // anything else = Demand-side (customer app)
+    if (ad.ad_side === 'SUPPLY') return 'SUPPLY'
+    return 'DEMAND'
+  }
+
   const generateAlternatives = async () => {
     if (!modalAd || !modalAnalysis) return
     setGeneratingAlts(true)
     setModalAlternatives([])
+    const adSide = detectAdSide(modalAd)
     const issuesSummary = modalAnalysis.improvements.join('. ')
-    const originalCopy = (modalAd.creative_body || modalAd.ad_name || '').toLowerCase()
-
-    // Detect side from actual ad copy keywords
-    const demandKeywords = ['delivery', 'order', 'book', 'send', 'ship', 'pickup', 'drop', 'bhejo', 'mangao', 'move bigger', 'get 3w', 'local delivery', 'starting', '₹250', 'on demand']
-    const supplyKeywords = ['earn', 'driver', 'partner', 'kamai', 'join', 'fleet', 'ride karo', 'paise', 'income', 'kamao']
-    const demandScore = demandKeywords.filter(k => originalCopy.includes(k)).length
-    const supplyScore = supplyKeywords.filter(k => originalCopy.includes(k)).length
-    const adSide = demandScore >= supplyScore ? 'DEMAND' : 'SUPPLY'
-
-    const demandContext = `DEMAND-SIDE AD — talking to BUSINESSES or CUSTOMERS who want to book a 3-wheeler for delivery.
-Target: Small business owners, D2C sellers, anyone who needs to send goods.
-Tone: "Book a 3-wheeler for your delivery needs"
-DO NOT mention earning, joining as partner, or driver recruitment.`
-
-    const supplyContext = `SUPPLY-SIDE AD — talking to 3-WHEELER DRIVERS who want to earn money by doing deliveries.
-Target: Auto-rickshaw operators, vehicle owners looking for income.
-Tone: "Earn money by delivering with us"
-DO NOT mention booking orders or customer delivery experience.`
+    const originalCopy = (modalAd.creative_body || modalAd.ad_name || '').trim()
 
     try {
       const res = await fetch('/api/generate-creative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          objective: `Fix underperforming ${adSide}-side ad — improve CTR from ${modalAd.ctr}% toward 1%+`,
+          objective: `Fix underperforming ad — improve CTR from ${Number(modalAd.ctr).toFixed(2)}% toward 1%+`,
           audience: adSide === 'DEMAND'
             ? 'Small business owners and D2C sellers who need 3-wheeler delivery'
             : '3-wheeler operators and auto drivers looking to earn',
-          offer: `Original ad copy: "${modalAd.creative_body || modalAd.ad_name}".
-Performance: CTR ${modalAd.ctr}%, Spend ₹${Number(modalAd.spend).toLocaleString('en-IN')}, Installs ${modalAd.installs || 'N/A'}.
-Issues to fix: ${issuesSummary}
-CRITICAL: This is a ${adSide}-SIDE ad. ${adSide === 'DEMAND' ? demandContext : supplyContext}
-Write 3 alternatives that fix the issues AND stay ${adSide}-side. Match the original ad's language and messaging direction exactly.`,
+          offer: `Original ad copy: "${originalCopy}". Performance: CTR ${Number(modalAd.ctr).toFixed(2)}%, Spend Rs.${Math.round(Number(modalAd.spend)).toLocaleString('en-IN')}, Installs: ${modalAd.installs || 0}. Issues to fix: ${issuesSummary}`,
           tone: Number(modalAd.ctr) < 0.8 ? 'Urgent' : 'Inspiring',
-          refCreative: modalAd.creative_body || '',
+          refCreative: originalCopy,
           adSide,
         }),
       })
+
       const data = await res.json()
-      setModalAlternatives(data.variants || [])
-    } catch { alert('Generation failed.') }
+
+      if (data.error) {
+        alert(`Failed to generate: ${data.error}${data.detail ? '\n' + data.detail : ''}`)
+        setGeneratingAlts(false)
+        return
+      }
+
+      if (!data.variants || data.variants.length === 0) {
+        alert('No variants returned. Please try again.')
+        setGeneratingAlts(false)
+        return
+      }
+
+      setModalAlternatives(data.variants)
+    } catch (e: any) {
+      alert(`Network error: ${e.message}`)
+    }
     setGeneratingAlts(false)
   }
 
@@ -216,12 +223,7 @@ Write 3 alternatives that fix the issues AND stay ${adSide}-side. Match the orig
   const generateAdImage = async (idx: number, v: ScriptVariant) => {
     if (!modalAd || !modalAnalysis) return
     setGeneratingImage(idx)
-    const originalCopy = (modalAd.creative_body || modalAd.ad_name || '').toLowerCase()
-    const demandKeywords = ['delivery', 'order', 'book', 'send', 'ship', 'pickup', 'drop', 'bhejo', 'move bigger', 'get 3w', 'local delivery', 'starting', '₹250', 'on demand']
-    const supplyKeywords = ['earn', 'driver', 'partner', 'kamai', 'join', 'fleet', 'paise', 'income', 'kamao']
-    const demandScore = demandKeywords.filter(k => originalCopy.includes(k)).length
-    const supplyScore = supplyKeywords.filter(k => originalCopy.includes(k)).length
-    const adSide = demandScore >= supplyScore ? 'DEMAND' : 'SUPPLY'
+    const adSide = detectAdSide(modalAd)
     try {
       const res = await fetch('/api/generate-ad-image', {
         method: 'POST',
@@ -238,7 +240,7 @@ Write 3 alternatives that fix the issues AND stay ${adSide}-side. Match the orig
       const data = await res.json()
       if (data.error) { alert(`Image generation failed: ${data.error}`); return }
       setGeneratedImages(prev => ({ ...prev, [idx]: data.image }))
-    } catch { alert('Image generation failed.') }
+    } catch (e: any) { alert(`Image generation failed: ${e.message}`) }
     setGeneratingImage(null)
   }
 
@@ -297,7 +299,19 @@ Write 3 alternatives that fix the issues AND stay ${adSide}-side. Match the orig
             }}>
               <div>
                 <p style={{ fontWeight: 700, fontSize: 16, margin: 0, color: '#111827' }}>{modalAd.ad_name}</p>
-                <p style={{ fontSize: 13, color: '#6B7280', margin: '2px 0 0' }}>{modalAd.campaign_name}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>{modalAd.campaign_name}</p>
+                  {modalAd.page_name && (
+                    <span style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600,
+                      background: detectAdSide(modalAd) === 'DEMAND' ? '#EEF2FF' : '#FFF7ED',
+                      color: detectAdSide(modalAd) === 'DEMAND' ? '#4338CA' : '#C2410C',
+                      border: `1px solid ${detectAdSide(modalAd) === 'DEMAND' ? '#C7D2FE' : '#FED7AA'}`
+                    }}>
+                      {detectAdSide(modalAd) === 'DEMAND' ? '📦 Demand-side (Quick App)' : '🚗 Supply-side (Partner App)'}
+                    </span>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 {modalAnalysis && (
