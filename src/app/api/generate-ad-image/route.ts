@@ -6,18 +6,30 @@ export async function POST(req: NextRequest) {
   if (!apiKey) return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 })
 
   // Build a tight, specific image prompt from the ad variant
-  const imagePrompt = `Performance marketing ad creative for Indian logistics app "Shiprocket Quick".
-Ad angle: ${variant.angle}
-Hook text to show on image: "${variant.hook}"
-CTA text: "${variant.cta}"
-Context: ${campaignContext}
+  const imagePrompt = `A professional mobile advertising creative for Shiprocket Quick, an Indian on-demand 3-wheeler delivery app.
 
-Visual style: Bold, high-contrast mobile ad. Real Indian street/delivery context. 
-Show a delivery rider or 3-wheeler vehicle in action. 
-Large readable Hindi/English text overlay showing the hook.
-Bright yellow and purple brand colors (Shiprocket Quick brand).
-Professional mobile feed ad format, 1:1 ratio.
-No watermarks, no borders. Photorealistic style.`
+AD CREATIVE SPECS:
+- Format: Square 1:1 mobile feed ad
+- Style: High-quality photorealistic advertisement, like a premium Indian brand campaign
+
+VISUAL CONTENT:
+- Hero image: A happy Indian auto-rickshaw (3-wheeler) driver in yellow Shiprocket Quick branded uniform, actively working/delivering in a busy Indian city street
+- Background: Vibrant Indian urban street, slightly blurred for depth
+- Lighting: Bright daylight, professional photography style
+
+TEXT ELEMENTS (must be clean, readable, professional):
+- Top area: Small "Shiprocket Quick" wordmark in white on purple pill badge, top-left corner
+- Center-bottom overlay: Bold white text on dark semi-transparent band: "${variant.hook}"
+- Bottom CTA button: Rounded purple button with white text: "${variant.cta}"
+- Keep text minimal — only hook + CTA, nothing else
+
+DESIGN RULES:
+- Yellow (#FFD000) and purple (#6B21A8) brand colors only
+- NO random text, NO fake Hindi characters, NO lorem ipsum
+- Clean professional layout like a Swiggy or Zomato ad
+- CTA button must look like a real tappable button, bottom center
+- DO NOT write "1-Wheeler" — always "3-Wheeler" if vehicle mentioned
+- Photorealistic, not illustrated or cartoonish`
 
   try {
     const res = await fetch('https://api.openai.com/v1/images/generations', {
