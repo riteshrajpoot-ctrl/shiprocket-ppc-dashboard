@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
-  const { variant, adName, campaignContext, referenceImageUrl } = await req.json()
+  const { variant, adName, campaignContext, referenceImageUrl, adSide } = await req.json()
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 })
 
@@ -9,14 +9,19 @@ export async function POST(req: NextRequest) {
   const cta = variant?.cta || ''
   const angle = variant?.angle || ''
 
+  const isDemand = adSide !== 'SUPPLY'
+
+  const sceneDescription = isDemand
+    ? `Scene: A happy small business owner or shopkeeper handing a package to a Shiprocket Quick 3-wheeler driver. The vehicle is loaded and ready to go. Setting: Indian shop/market area.`
+    : `Scene: A confident cartoon Indian auto-rickshaw driver in Shiprocket Quick yellow uniform, smiling, thumbs up. Yellow 3-wheeler beside him. Setting: Indian city street.`
+
   const prompt = `Square mobile ad creative for "Shiprocket Quick" — Indian on-demand 3-wheeler delivery app.
 
 STYLE: Flat vector cartoon illustration. Bold, colorful. NOT photorealistic. Similar to Swiggy/Zomato illustrated ads.
 
 COMPOSITION:
 - Bright yellow (#FFD000) background with simple geometric shapes
-- Center: Friendly cartoon Indian auto-rickshaw driver in yellow Shiprocket Quick branded t-shirt, smiling, thumbs up pose
-- Right side: Yellow cartoon 3-wheeler auto-rickshaw vehicle
+- ${sceneDescription}
 - Top-left corner: Small white rounded rectangle with purple "Shiprocket Quick" text
 
 TEXT ON IMAGE (exact text, clean typography):
