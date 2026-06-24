@@ -1,64 +1,89 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
-  const { variant, adName, campaignContext, referenceImageUrl, adSide } = await req.json()
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 })
+  try {
+    const body = await req.json()
+    const { objective, audience, offer, tone, refCreative, refImage, adSide } = body
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) return NextResponse.json({ error: 'Missing ANTHROPIC_API_KEY' }, { status: 500 })
 
-  const hook = variant?.hook || ''
-  const cta = variant?.cta || ''
-  const angle = variant?.angle || ''
+    const contentBlocks: any[] = []
 
-  const isDemand = adSide !== 'SUPPLY'
+    if (refImage) {
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: refImage }
+      })
+    }
 
-  const sceneDescription = isDemand
-    ? `Scene: A happy small business owner or shopkeeper handing a package to a Shiprocket Quick 3-wheeler driver. The vehicle is loaded and ready to go. Setting: Indian shop/market area.`
-    : `Scene: A confident cartoon Indian auto-rickshaw driver in Shiprocket Quick yellow uniform, smiling, thumbs up. Yellow 3-wheeler beside him. Setting: Indian city street.`
+    const refSection = (refCreative || refImage)
+      ? `\nREFERENCE CREATIVE:${refImage ? ' (see image above)' : ''}${refCreative ? `\n"${refCreative}"` : ''}\nMatch its language style, Hinglish ratio, and copy length.`
+      : ''
 
-  const prompt = `Square mobile ad creative for "Shiprocket Quick" — Indian on-demand 3-wheeler delivery app.
+    const sideRule = adSide === 'SUPPLY'
+      ? `\nCRITICAL — SUPPLY-SIDE AD: Talking to 3-WHEELER DRIVERS wanting to earn money.\n- Write about: earning, flexible work, guaranteed orders, daily payout\n- NEVER mention: booking delivery, customer experience, sending goods\n- Good CTAs: "Partner Bano Aaj", "Kamaana Shuru Karo", "Abhi Join Karo"`
+      : `\nCRITICAL — DEMAND-SIDE AD: Talking to CUSTOMERS or BUSINESSES who want to book 3-wheeler delivery.\n- Write about: fast delivery, affordable rates, easy booking, 3-wheeler for sending goods\n- NEVER mention: earning, joining as partner, driver recruitment\n- Good CTAs: "Abhi Book Karo", "Pehli Delivery Free", "Order Karo Abhi"`
 
-STYLE: Flat vector cartoon illustration. Bold, colorful. NOT photorealistic. Similar to Swiggy/Zomato illustrated ads.
+    const prompt = `You are a top performance creative writer for Shiprocket Quick, India's on-demand 3-wheeler delivery app.
 
-COMPOSITION:
-- Bright yellow (#FFD000) background with simple geometric shapes
-- ${sceneDescription}
-- Top-left corner: Small white rounded rectangle with purple "Shiprocket Quick" text
-
-TEXT ON IMAGE (exact text, clean typography):
-- Large bold white text center-top: "${hook}"
-- Bottom-center: Rounded purple (#6B21A8) pill button, white text: "${cta}"
+Brief:
+- Objective: ${objective || 'Improve ad performance'}
+- Target audience: ${audience || 'Relevant audience'}
+- Key offer/USP: ${offer || 'Shiprocket Quick service'}
+- Tone: ${tone || 'Urgent'}
+${sideRule}
+${refSection}
 
 RULES:
-- Only yellow and purple colors
-- No extra text anywhere else
-- CTA button must look like a real rounded button
-- Clean professional ad layout
-- Angle/mood: ${angle}`
+1. Hook: MAX 8 words. Instant curiosity or urgency.
+2. Body: MAX 2 short sentences. One problem, one solution.
+3. CTA: 3-5 words. Action verb first.
+4. Natural Hinglish. Not forced translation.
+5. Each variant must have a genuinely different angle.
+6. Always write "3-Wheeler" never "1-Wheeler".
+7. Use specific numbers from the offer if available.
 
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-image-1',
-      prompt,
-      n: 1,
-      size: '1024x1024',
-      quality: 'high',
-    }),
-  })
+Return ONLY a valid JSON object. No markdown, no explanation, no backticks:
+{"variants":[{"variant":1,"format":"Video ad","angle":"angle name","hook":"hook text","body":"body text","cta":"cta text"},{"variant":2,"format":"Carousel ad","angle":"angle name","hook":"hook text","body":"body text","cta":"cta text"},{"variant":3,"format":"Static image","angle":"angle name","hook":"hook text","body":"body text","cta":"cta text"}]}`
 
-  const data = await res.json()
+    contentBlocks.push({ type: 'text', text: prompt })
 
-  if (data.error) {
-    return NextResponse.json({ error: data.error.message }, { status: 400 })
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: contentBlocks }],
+      }),
+    })
+
+    if (!res.ok) {
+      const errText = await res.text()
+      return NextResponse.json({ error: `Anthropic API error: ${res.status}`, detail: errText }, { status: 500 })
+    }
+
+    const data = await res.json()
+
+    // Safely extract text from any content block type
+    const textBlock = data.content?.find((b: any) => b.type === 'text')
+    if (!textBlock?.text) {
+      return NextResponse.json({ error: 'No text in response', raw: data }, { status: 500 })
+    }
+
+    const clean = textBlock.text
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim()
+
+    const parsed = JSON.parse(clean)
+    return NextResponse.json(parsed)
+
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Unknown error' }, { status: 500 })
   }
-
-  const b64 = data.data?.[0]?.b64_json
-  const url = data.data?.[0]?.url
-  const image = b64 ? `data:image/png;base64,${b64}` : url
-
-  return NextResponse.json({ image })
 }
