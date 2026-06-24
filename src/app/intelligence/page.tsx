@@ -61,6 +61,12 @@ export default function IntelligencePage() {
   const [modalAlternatives, setModalAlternatives] = useState<ScriptVariant[]>([])
   const [generatingAlts, setGeneratingAlts] = useState(false)
   const [copiedAlt, setCopiedAlt] = useState<number | null>(null)
+  const [imageBriefs, setImageBriefs] = useState<Record<number, any>>({})
+  const [generatingBrief, setGeneratingBrief] = useState<number | null>(null)
+  const [expandedBrief, setExpandedBrief] = useState<number | null>(null)
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null)
+  const [generatedImages, setGeneratedImages] = useState<Record<number, string>>({})
+  const [generatingImage, setGeneratingImage] = useState<number | null>(null)
 
   // Script generator tab
   const [objective, setObjective] = useState('First order conversion')
@@ -120,6 +126,10 @@ export default function IntelligencePage() {
     setModalAnalysis(null)
     setModalAlternatives([])
     setGeneratingAlts(false)
+    setImageBriefs({})
+    setExpandedBrief(null)
+    setGeneratedImages({})
+    setGeneratingImage(null)
   }
 
   const generateAlternatives = async () => {
@@ -149,6 +159,53 @@ export default function IntelligencePage() {
     navigator.clipboard.writeText(`HOOK: ${v.hook}\n\nBODY: ${v.body}\n\nCTA: ${v.cta}`)
     setCopiedAlt(idx)
     setTimeout(() => setCopiedAlt(null), 2000)
+  }
+
+  const generateImageBrief = async (idx: number, v: ScriptVariant) => {
+    if (!modalAd || !modalAnalysis) return
+    setGeneratingBrief(idx)
+    setExpandedBrief(idx)
+    try {
+      const res = await fetch('/api/generate-image-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variant: v,
+          adName: modalAd.ad_name,
+          campaignContext: modalAd.campaign_name,
+          issues: modalAnalysis.improvements.join('. ')
+        }),
+      })
+      const data = await res.json()
+      setImageBriefs(prev => ({ ...prev, [idx]: data }))
+    } catch { alert('Image brief generation failed.') }
+    setGeneratingBrief(null)
+  }
+
+  const copyPrompt = (text: string, key: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedPrompt(key); setTimeout(() => setCopiedPrompt(null), 2000)
+  }
+
+  const generateAdImage = async (idx: number, v: ScriptVariant) => {
+    if (!modalAd || !modalAnalysis) return
+    setGeneratingImage(idx)
+    try {
+      const res = await fetch('/api/generate-ad-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variant: v,
+          adName: modalAd.ad_name,
+          campaignContext: modalAd.campaign_name,
+          issues: modalAnalysis.improvements.join('. '),
+        }),
+      })
+      const data = await res.json()
+      if (data.error) { alert(`Image generation failed: ${data.error}`); return }
+      setGeneratedImages(prev => ({ ...prev, [idx]: data.image }))
+    } catch { alert('Image generation failed.') }
+    setGeneratingImage(null)
   }
 
   const handleRefUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -383,34 +440,210 @@ export default function IntelligencePage() {
                         </div>
                         {modalAlternatives.map((v, i) => (
                           <div key={i} style={{
-                            border: '1.5px solid #E5E7EB', borderRadius: 12, padding: 16, marginBottom: 12,
-                            background: '#FAFAFA'
+                            border: '1.5px solid #E5E7EB', borderRadius: 12, marginBottom: 12,
+                            background: '#FAFAFA', overflow: 'hidden'
                           }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <span style={{ fontWeight: 700, fontSize: 13, color: '#4F46E5' }}>Alt {v.variant}</span>
-                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#EEF2FF', color: '#4338CA', fontWeight: 500 }}>{v.format}</span>
-                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#F0FDF4', color: '#065F46', fontWeight: 500 }}>{v.angle}</span>
+                            {/* Copy header */}
+                            <div style={{ padding: 16 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 700, fontSize: 13, color: '#4F46E5' }}>Alt {v.variant}</span>
+                                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#EEF2FF', color: '#4338CA', fontWeight: 500 }}>{v.format}</span>
+                                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#F0FDF4', color: '#065F46', fontWeight: 500 }}>{v.angle}</span>
+                                </div>
+                                <button onClick={() => copyAlt(i, v)} style={{
+                                  padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                                  border: '1px solid #E5E7EB',
+                                  background: copiedAlt === i ? '#F0FDF4' : '#fff',
+                                  color: copiedAlt === i ? '#059669' : '#374151', cursor: 'pointer'
+                                }}>{copiedAlt === i ? '✅ Copied!' : 'Copy copy'}</button>
                               </div>
-                              <button onClick={() => copyAlt(i, v)} style={{
-                                padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
-                                border: '1px solid #E5E7EB',
-                                background: copiedAlt === i ? '#F0FDF4' : '#fff',
-                                color: copiedAlt === i ? '#059669' : '#374151', cursor: 'pointer'
-                              }}>{copiedAlt === i ? '✅ Copied!' : 'Copy'}</button>
+                              <div style={{ background: '#FFF7ED', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: '#C2410C', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hook</p>
+                                <p style={{ fontSize: 14, fontWeight: 700, color: '#1C1917', margin: 0 }}>{v.hook}</p>
+                              </div>
+                              <div style={{ background: '#F8FAFC', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: '#64748B', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Body</p>
+                                <p style={{ fontSize: 13, color: '#374151', margin: 0, lineHeight: 1.6 }}>{v.body}</p>
+                              </div>
+                              <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: '#065F46', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>CTA</p>
+                                <p style={{ fontSize: 14, fontWeight: 700, color: '#064E3B', margin: 0 }}>{v.cta}</p>
+                              </div>
+
+                              {/* Generate image button */}
+                              {!generatedImages[i] && generatingImage !== i && (
+                                <button onClick={() => generateAdImage(i, v)} style={{
+                                  width: '100%', padding: '10px 0', marginBottom: 8,
+                                  background: 'linear-gradient(135deg,#F59E0B,#EF4444)',
+                                  color: '#fff', border: 'none', borderRadius: 8,
+                                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                                }}>
+                                  🎨 Generate ad image with AI
+                                </button>
+                              )}
+                              {generatingImage === i && (
+                                <div style={{
+                                  textAlign: 'center', padding: '16px 0', marginBottom: 8,
+                                  background: '#FFF7ED', borderRadius: 8,
+                                  border: '1px solid #FDE68A'
+                                }}>
+                                  <div style={{ fontSize: 24, marginBottom: 6 }}>⚡</div>
+                                  <p style={{ fontSize: 13, color: '#D97706', fontWeight: 600, margin: 0 }}>Generating image...</p>
+                                  <p style={{ fontSize: 11, color: '#92400E', margin: '4px 0 0' }}>Takes ~15–20 seconds</p>
+                                </div>
+                              )}
+
+                              {/* Generated image result */}
+                              {generatedImages[i] && (
+                                <div style={{ marginBottom: 8 }}>
+                                  <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: '2px solid #6366F1' }}>
+                                    <img
+                                      src={generatedImages[i]}
+                                      alt={`Generated creative for ${v.angle}`}
+                                      style={{ width: '100%', display: 'block' }}
+                                    />
+                                    <div style={{
+                                      position: 'absolute', top: 8, right: 8,
+                                      display: 'flex', gap: 6
+                                    }}>
+                                      <a
+                                        href={generatedImages[i]}
+                                        download={`${modalAd?.ad_name}_alt${i+1}.png`}
+                                        style={{
+                                          padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                          background: 'rgba(0,0,0,0.7)', color: '#fff',
+                                          textDecoration: 'none', backdropFilter: 'blur(4px)'
+                                        }}>⬇ Download</a>
+                                      <button onClick={() => generateAdImage(i, v)} style={{
+                                        padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                        background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none',
+                                        cursor: 'pointer', backdropFilter: 'blur(4px)'
+                                      }}>🔄 Regenerate</button>
+                                    </div>
+                                  </div>
+                                  <p style={{ fontSize: 11, color: '#9CA3AF', margin: '6px 0 0', textAlign: 'center' }}>
+                                    Generated by GPT-image-1 · Click download to save
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Image brief toggle button */}
+                              {!imageBriefs[i] && generatingBrief !== i && (
+                                <button onClick={() => generateImageBrief(i, v)} style={{
+                                  width: '100%', padding: '9px 0',
+                                  background: '#fff', border: '1.5px solid #8B5CF6',
+                                  borderRadius: 8, fontSize: 13, fontWeight: 600,
+                                  color: '#7C3AED', cursor: 'pointer',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
+                                }}>
+                                  🖼 Generate image brief + prompts
+                                </button>
+                              )}
+                              {generatingBrief === i && (
+                                <div style={{ textAlign: 'center', padding: '10px 0', color: '#7C3AED', fontSize: 13, fontWeight: 500 }}>
+                                  ⏳ Generating Canva brief + Midjourney prompt...
+                                </div>
+                              )}
                             </div>
-                            <div style={{ background: '#FFF7ED', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
-                              <p style={{ fontSize: 10, fontWeight: 700, color: '#C2410C', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hook</p>
-                              <p style={{ fontSize: 14, fontWeight: 700, color: '#1C1917', margin: 0 }}>{v.hook}</p>
-                            </div>
-                            <div style={{ background: '#F8FAFC', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
-                              <p style={{ fontSize: 10, fontWeight: 700, color: '#64748B', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Body</p>
-                              <p style={{ fontSize: 13, color: '#374151', margin: 0, lineHeight: 1.6 }}>{v.body}</p>
-                            </div>
-                            <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '8px 12px' }}>
-                              <p style={{ fontSize: 10, fontWeight: 700, color: '#065F46', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>CTA</p>
-                              <p style={{ fontSize: 14, fontWeight: 700, color: '#064E3B', margin: 0 }}>{v.cta}</p>
-                            </div>
+
+                            {/* Image brief expanded panel */}
+                            {imageBriefs[i] && (
+                              <div style={{ borderTop: '1px solid #E5E7EB', background: '#FAF5FF' }}>
+                                {/* Toggle header */}
+                                <button onClick={() => setExpandedBrief(expandedBrief === i ? null : i)} style={{
+                                  width: '100%', padding: '10px 16px', background: 'transparent', border: 'none',
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer'
+                                }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: '#7C3AED' }}>🖼 Image brief + prompts</span>
+                                  <span style={{ fontSize: 12, color: '#9CA3AF' }}>{expandedBrief === i ? '▲ collapse' : '▼ expand'}</span>
+                                </button>
+
+                                {expandedBrief === i && (
+                                  <div style={{ padding: '0 16px 16px' }}>
+                                    {/* Design direction */}
+                                    {imageBriefs[i].design_direction && (
+                                      <div style={{ background: '#EDE9FE', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                                        <p style={{ fontSize: 11, fontWeight: 700, color: '#5B21B6', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🎯 Creative direction</p>
+                                        <p style={{ fontSize: 13, color: '#3B0764', margin: 0, lineHeight: 1.6 }}>{imageBriefs[i].design_direction}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Canva brief */}
+                                    {imageBriefs[i].canva_brief && (
+                                      <div style={{ background: '#fff', border: '1px solid #DDD6FE', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                                          <p style={{ fontSize: 12, fontWeight: 700, color: '#5B21B6', margin: 0 }}>🎨 Canva brief</p>
+                                          <button onClick={() => copyPrompt(JSON.stringify(imageBriefs[i].canva_brief, null, 2), `canva-${i}`)} style={{
+                                            padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: 500,
+                                            border: '1px solid #DDD6FE', background: copiedPrompt === `canva-${i}` ? '#F0FDF4' : '#F5F3FF',
+                                            color: copiedPrompt === `canva-${i}` ? '#059669' : '#7C3AED', cursor: 'pointer'
+                                          }}>{copiedPrompt === `canva-${i}` ? '✅ Copied' : 'Copy brief'}</button>
+                                        </div>
+                                        {[
+                                          { label: 'Dimensions', val: imageBriefs[i].canva_brief.dimensions },
+                                          { label: 'Background', val: imageBriefs[i].canva_brief.background },
+                                          { label: 'Hero visual', val: imageBriefs[i].canva_brief.hero_visual },
+                                          { label: 'Headline overlay', val: imageBriefs[i].canva_brief.text_overlay?.headline },
+                                          { label: 'Subtext', val: imageBriefs[i].canva_brief.text_overlay?.subtext },
+                                          { label: 'CTA button', val: imageBriefs[i].canva_brief.text_overlay?.cta_button },
+                                          { label: 'Typography', val: imageBriefs[i].canva_brief.typography },
+                                          { label: 'Layout notes', val: imageBriefs[i].canva_brief.layout_notes },
+                                          { label: 'Brand elements', val: imageBriefs[i].canva_brief.brand_elements },
+                                        ].filter(r => r.val).map(row => (
+                                          <div key={row.label} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                                            <span style={{ fontSize: 11, color: '#7C3AED', fontWeight: 600, flexShrink: 0, minWidth: 110 }}>{row.label}</span>
+                                            <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{row.val}</span>
+                                          </div>
+                                        ))}
+                                        {/* Color palette */}
+                                        {imageBriefs[i].canva_brief.color_palette?.length > 0 && (
+                                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+                                            <span style={{ fontSize: 11, color: '#7C3AED', fontWeight: 600, minWidth: 110 }}>Color palette</span>
+                                            <div style={{ display: 'flex', gap: 4 }}>
+                                              {imageBriefs[i].canva_brief.color_palette.map((c: string, ci: number) => (
+                                                <div key={ci} title={c} style={{ width: 20, height: 20, borderRadius: 4, background: c, border: '1px solid #E5E7EB' }} />
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Midjourney prompt */}
+                                    {imageBriefs[i].midjourney_prompt && (
+                                      <div style={{ background: '#fff', border: '1px solid #DDD6FE', borderRadius: 8, padding: '12px 14px', marginBottom: 10 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                          <p style={{ fontSize: 12, fontWeight: 700, color: '#5B21B6', margin: 0 }}>⚡ Midjourney prompt</p>
+                                          <button onClick={() => copyPrompt(imageBriefs[i].midjourney_prompt, `mj-${i}`)} style={{
+                                            padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: 500,
+                                            border: '1px solid #DDD6FE', background: copiedPrompt === `mj-${i}` ? '#F0FDF4' : '#F5F3FF',
+                                            color: copiedPrompt === `mj-${i}` ? '#059669' : '#7C3AED', cursor: 'pointer'
+                                          }}>{copiedPrompt === `mj-${i}` ? '✅ Copied' : 'Copy prompt'}</button>
+                                        </div>
+                                        <p style={{ fontSize: 12, color: '#374151', margin: 0, lineHeight: 1.6, fontFamily: 'monospace', background: '#F5F3FF', padding: '8px 10px', borderRadius: 6 }}>{imageBriefs[i].midjourney_prompt}</p>
+                                      </div>
+                                    )}
+
+                                    {/* DALL-E prompt */}
+                                    {imageBriefs[i].dalle_prompt && (
+                                      <div style={{ background: '#fff', border: '1px solid #DDD6FE', borderRadius: 8, padding: '12px 14px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                          <p style={{ fontSize: 12, fontWeight: 700, color: '#5B21B6', margin: 0 }}>🤖 DALL·E prompt</p>
+                                          <button onClick={() => copyPrompt(imageBriefs[i].dalle_prompt, `dalle-${i}`)} style={{
+                                            padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: 500,
+                                            border: '1px solid #DDD6FE', background: copiedPrompt === `dalle-${i}` ? '#F0FDF4' : '#F5F3FF',
+                                            color: copiedPrompt === `dalle-${i}` ? '#059669' : '#7C3AED', cursor: 'pointer'
+                                          }}>{copiedPrompt === `dalle-${i}` ? '✅ Copied' : 'Copy prompt'}</button>
+                                        </div>
+                                        <p style={{ fontSize: 12, color: '#374151', margin: 0, lineHeight: 1.6, fontFamily: 'monospace', background: '#F5F3FF', padding: '8px 10px', borderRadius: 6 }}>{imageBriefs[i].dalle_prompt}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                         <button onClick={generateAlternatives} style={{
