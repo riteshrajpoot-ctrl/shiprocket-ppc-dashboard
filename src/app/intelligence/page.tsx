@@ -137,27 +137,42 @@ export default function IntelligencePage() {
     setGeneratingAlts(true)
     setModalAlternatives([])
     const issuesSummary = modalAnalysis.improvements.join('. ')
-    const campaignName = modalAd.campaign_name.toLowerCase()
-    // Infer audience from campaign name
-    const is3W = campaignName.includes('3w') || campaignName.includes('3-wheel')
-    const isPartner = campaignName.includes('partner') || campaignName.includes('rider')
-    const inferredAudience = is3W ? '3-wheeler / EV operators in Delhi NCR'
-      : isPartner ? 'Two-wheeler delivery partners'
-      : '3-wheeler operators and delivery partners'
+    const originalCopy = (modalAd.creative_body || modalAd.ad_name || '').toLowerCase()
+
+    // Detect side from actual ad copy keywords
+    const demandKeywords = ['delivery', 'order', 'book', 'send', 'ship', 'pickup', 'drop', 'bhejo', 'mangao', 'move bigger', 'get 3w', 'local delivery', 'starting', '₹250', 'on demand']
+    const supplyKeywords = ['earn', 'driver', 'partner', 'kamai', 'join', 'fleet', 'ride karo', 'paise', 'income', 'kamao']
+    const demandScore = demandKeywords.filter(k => originalCopy.includes(k)).length
+    const supplyScore = supplyKeywords.filter(k => originalCopy.includes(k)).length
+    const adSide = demandScore >= supplyScore ? 'DEMAND' : 'SUPPLY'
+
+    const demandContext = `DEMAND-SIDE AD — talking to BUSINESSES or CUSTOMERS who want to book a 3-wheeler for delivery.
+Target: Small business owners, D2C sellers, anyone who needs to send goods.
+Tone: "Book a 3-wheeler for your delivery needs"
+DO NOT mention earning, joining as partner, or driver recruitment.`
+
+    const supplyContext = `SUPPLY-SIDE AD — talking to 3-WHEELER DRIVERS who want to earn money by doing deliveries.
+Target: Auto-rickshaw operators, vehicle owners looking for income.
+Tone: "Earn money by delivering with us"
+DO NOT mention booking orders or customer delivery experience.`
 
     try {
       const res = await fetch('/api/generate-creative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          objective: 'Fix underperforming ad — improve CTR and installs',
-          audience: inferredAudience,
-          offer: `Original ad copy: "${modalAd.creative_body || modalAd.ad_name}". 
-Performance: CTR ${modalAd.ctr}%, CPI ₹${modalAd.installs ? Math.round(Number(modalAd.spend)/modalAd.installs) : 'N/A'}, Spend ₹${Number(modalAd.spend).toLocaleString('en-IN')}.
-Issues identified: ${issuesSummary}
-Write 3 alternatives that DIRECTLY fix each issue above. Keep hooks under 8 words. Body max 2 sentences.`,
+          objective: `Fix underperforming ${adSide}-side ad — improve CTR from ${modalAd.ctr}% toward 1%+`,
+          audience: adSide === 'DEMAND'
+            ? 'Small business owners and D2C sellers who need 3-wheeler delivery'
+            : '3-wheeler operators and auto drivers looking to earn',
+          offer: `Original ad copy: "${modalAd.creative_body || modalAd.ad_name}".
+Performance: CTR ${modalAd.ctr}%, Spend ₹${Number(modalAd.spend).toLocaleString('en-IN')}, Installs ${modalAd.installs || 'N/A'}.
+Issues to fix: ${issuesSummary}
+CRITICAL: This is a ${adSide}-SIDE ad. ${adSide === 'DEMAND' ? demandContext : supplyContext}
+Write 3 alternatives that fix the issues AND stay ${adSide}-side. Match the original ad's language and messaging direction exactly.`,
           tone: Number(modalAd.ctr) < 0.8 ? 'Urgent' : 'Inspiring',
           refCreative: modalAd.creative_body || '',
+          adSide,
         }),
       })
       const data = await res.json()
@@ -201,6 +216,12 @@ Write 3 alternatives that DIRECTLY fix each issue above. Keep hooks under 8 word
   const generateAdImage = async (idx: number, v: ScriptVariant) => {
     if (!modalAd || !modalAnalysis) return
     setGeneratingImage(idx)
+    const originalCopy = (modalAd.creative_body || modalAd.ad_name || '').toLowerCase()
+    const demandKeywords = ['delivery', 'order', 'book', 'send', 'ship', 'pickup', 'drop', 'bhejo', 'move bigger', 'get 3w', 'local delivery', 'starting', '₹250', 'on demand']
+    const supplyKeywords = ['earn', 'driver', 'partner', 'kamai', 'join', 'fleet', 'paise', 'income', 'kamao']
+    const demandScore = demandKeywords.filter(k => originalCopy.includes(k)).length
+    const supplyScore = supplyKeywords.filter(k => originalCopy.includes(k)).length
+    const adSide = demandScore >= supplyScore ? 'DEMAND' : 'SUPPLY'
     try {
       const res = await fetch('/api/generate-ad-image', {
         method: 'POST',
@@ -211,6 +232,7 @@ Write 3 alternatives that DIRECTLY fix each issue above. Keep hooks under 8 word
           campaignContext: modalAd.campaign_name,
           issues: modalAnalysis.improvements.join('. '),
           referenceImageUrl: modalAd.thumbnail_url || null,
+          adSide,
         }),
       })
       const data = await res.json()
