@@ -137,16 +137,27 @@ export default function IntelligencePage() {
     setGeneratingAlts(true)
     setModalAlternatives([])
     const issuesSummary = modalAnalysis.improvements.join('. ')
+    const campaignName = modalAd.campaign_name.toLowerCase()
+    // Infer audience from campaign name
+    const is3W = campaignName.includes('3w') || campaignName.includes('3-wheel')
+    const isPartner = campaignName.includes('partner') || campaignName.includes('rider')
+    const inferredAudience = is3W ? '3-wheeler / EV operators in Delhi NCR'
+      : isPartner ? 'Two-wheeler delivery partners'
+      : '3-wheeler operators and delivery partners'
+
     try {
       const res = await fetch('/api/generate-creative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          objective: 'Improve underperforming ad',
-          audience: 'Same target audience as original ad',
-          offer: `Original ad: "${modalAd.creative_body || modalAd.ad_name}". Key issues to fix: ${issuesSummary}`,
-          tone: 'Urgent',
-          refCreative: modalAd.creative_body || modalAd.ad_name,
+          objective: 'Fix underperforming ad — improve CTR and installs',
+          audience: inferredAudience,
+          offer: `Original ad copy: "${modalAd.creative_body || modalAd.ad_name}". 
+Performance: CTR ${modalAd.ctr}%, CPI ₹${modalAd.installs ? Math.round(Number(modalAd.spend)/modalAd.installs) : 'N/A'}, Spend ₹${Number(modalAd.spend).toLocaleString('en-IN')}.
+Issues identified: ${issuesSummary}
+Write 3 alternatives that DIRECTLY fix each issue above. Keep hooks under 8 words. Body max 2 sentences.`,
+          tone: Number(modalAd.ctr) < 0.8 ? 'Urgent' : 'Inspiring',
+          refCreative: modalAd.creative_body || '',
         }),
       })
       const data = await res.json()
@@ -199,6 +210,7 @@ export default function IntelligencePage() {
           adName: modalAd.ad_name,
           campaignContext: modalAd.campaign_name,
           issues: modalAnalysis.improvements.join('. '),
+          referenceImageUrl: modalAd.thumbnail_url || null,
         }),
       })
       const data = await res.json()
