@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   try {
     // Fetch ad-level insights with creative fields
     const insightsUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
-    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend,impressions,clicks,ctr,cpc,actions')
+    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions')
     insightsUrl.searchParams.set('level', 'ad')
     insightsUrl.searchParams.set('time_range[since]', dateStart)
     insightsUrl.searchParams.set('time_range[until]', dateEnd)
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const adIds = insightsData.map((a: any) => a.ad_id).filter(Boolean)
 
     // Batch fetch ad creatives
-    const creativeMap: Record<string, { body: string; title: string; snapshot_url: string; creative_id: string }> = {}
+    const creativeMap: Record<string, { body: string; title: string; snapshot_url: string; creative_id: string; ad_side: string; store_url: string }> = {}
 
     if (adIds.length > 0) {
       // Fetch in batches of 20
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
         // Use batch request
         const batchReqs = batch.map((id: string) => ({
           method: 'GET',
-          relative_url: `${id}?fields=creative{id,body,title,object_story_spec,image_url,thumbnail_url,effective_instagram_media_id,effective_object_story_id}`
+          relative_url: `${id}?fields=creative{id,body,title,object_story_spec,image_url,thumbnail_url,object_store_url}`
         }))
 
         const batchRes = await fetch(`https://graph.facebook.com/v19.0/?batch=${encodeURIComponent(JSON.stringify(batchReqs))}&access_token=${token}&include_headers=false`, {
@@ -58,18 +58,23 @@ export async function GET(req: NextRequest) {
               try {
                 const adData = JSON.parse(item.body)
                 const creative = adData.creative || {}
-                // Priority: image_url (full res) > object_story_spec image > thumbnail_url (low res)
                 const fullImage =
                   creative.image_url ||
                   creative.object_story_spec?.link_data?.image_hash ||
                   creative.object_story_spec?.photo_data?.url ||
-                  creative.thumbnail_url ||
-                  ''
+                  creative.thumbnail_url || ''
+                const storeUrl =
+                  creative.object_store_url ||
+                  creative.object_story_spec?.link_data?.link ||
+                  creative.object_story_spec?.video_data?.call_to_action?.value?.link || ''
+                const adSide = storeUrl.includes('quickpartner') ? 'SUPPLY' : 'DEMAND'
                 creativeMap[batch[idx]] = {
                   body: creative.body || creative.object_story_spec?.link_data?.message || creative.object_story_spec?.video_data?.message || '',
                   title: creative.title || creative.object_story_spec?.link_data?.name || '',
                   snapshot_url: fullImage,
-                  creative_id: creative.id || ''
+                  creative_id: creative.id || '',
+                  ad_side: adSide,
+                  store_url: storeUrl,
                 }
               } catch {}
             }
@@ -151,6 +156,7 @@ export async function GET(req: NextRequest) {
           ad_name: a.ad_name,
           campaign_name: a.campaign_name,
           adset_name: a.adset_name,
+          page_name: a.account_name || '',
           spend: a.spend,
           impressions: a.impressions,
           clicks: a.clicks,
@@ -163,6 +169,8 @@ export async function GET(req: NextRequest) {
           thumbnail_url: creative.snapshot_url || '',
           ad_snapshot_url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=596746546417726&selected_ad_ids=${a.ad_id}`,
           preview_url: previewMap[a.ad_id] || '',
+          ad_side: creative.ad_side || 'DEMAND',
+          store_url: creative.store_url || '',
         }
       })
 
