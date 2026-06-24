@@ -230,20 +230,24 @@ export default function IntelligencePage() {
               <div style={{ borderRight: '1px solid #F3F4F6', padding: 24, background: '#FAFAFA' }}>
                 {/* Big creative image */}
                 <div style={{
-                  width: '100%', aspectRatio: '9/16', maxHeight: 320,
-                  borderRadius: 12, overflow: 'hidden', marginBottom: 16,
-                  background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: '1px solid #E5E7EB'
+                  width: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: 16,
+                  background: '#F3F4F6', border: '1px solid #E5E7EB',
+                  minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }}>
                   {modalAd.thumbnail_url ? (
                     <img src={modalAd.thumbnail_url} alt={modalAd.ad_name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={e => { (e.target as HTMLImageElement).src = '' }}
+                      style={{ width: '100%', height: 'auto', display: 'block', maxHeight: 380, objectFit: 'contain' }}
+                      onError={e => {
+                        const el = e.target as HTMLImageElement
+                        el.style.display = 'none'
+                        el.parentElement!.innerHTML = '<div style="text-align:center;padding:32px;color:#9CA3AF"><div style="font-size:36px;margin-bottom:8px">🎬</div><p style="font-size:13px;margin:0;font-weight:500">Video ad</p><p style="font-size:12px;margin:4px 0 0">Preview not available — view in Ads Manager</p></div>'
+                      }}
                     />
                   ) : (
-                    <div style={{ textAlign: 'center', color: '#9CA3AF' }}>
-                      <div style={{ fontSize: 40, marginBottom: 8 }}>🖼</div>
-                      <p style={{ fontSize: 12, margin: 0 }}>No preview available</p>
+                    <div style={{ textAlign: 'center', padding: 32, color: '#9CA3AF' }}>
+                      <div style={{ fontSize: 36, marginBottom: 8 }}>🎬</div>
+                      <p style={{ fontSize: 13, margin: 0, fontWeight: 500 }}>Video ad</p>
+                      <p style={{ fontSize: 12, margin: '4px 0 0' }}>Preview not available — view in Ads Manager</p>
                     </div>
                   )}
                 </div>
