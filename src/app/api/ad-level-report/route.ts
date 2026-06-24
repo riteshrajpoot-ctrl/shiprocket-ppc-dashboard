@@ -108,6 +108,35 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Third pass: fetch ad preview iframe URLs (DESKTOP_FEED_STANDARD gives best quality)
+    const previewMap: Record<string, string> = {}
+    const adIdsForPreview = insightsData.filter((a: any) => Number(a.spend) > 0).map((a: any) => a.ad_id).slice(0, 60)
+    const previewBatchSize = 10
+    for (let i = 0; i < adIdsForPreview.length; i += previewBatchSize) {
+      const batch = adIdsForPreview.slice(i, i + previewBatchSize)
+      const batchReqs = batch.map((id: string) => ({
+        method: 'GET',
+        relative_url: `${id}/previews?ad_format=MOBILE_FEED_STANDARD`
+      }))
+      try {
+        const res = await fetch(`https://graph.facebook.com/v19.0/?batch=${encodeURIComponent(JSON.stringify(batchReqs))}&access_token=${token}&include_headers=false`, { method: 'POST' })
+        const json = await res.json()
+        if (Array.isArray(json)) {
+          json.forEach((item: any, idx: number) => {
+            if (item.code === 200) {
+              try {
+                const d = JSON.parse(item.body)
+                const iframeHtml: string = d.data?.[0]?.body || ''
+                // Extract src from iframe tag
+                const match = iframeHtml.match(/src="([^"]+)"/)
+                if (match?.[1]) previewMap[batch[idx]] = match[1].replace(/&amp;/g, '&')
+              } catch {}
+            }
+          })
+        }
+      } catch {}
+    }
+
     // Merge insights + creatives
     const ads = insightsData
       .filter((a: any) => Number(a.spend) > 0)
@@ -132,7 +161,8 @@ export async function GET(req: NextRequest) {
           creative_body: creative.body || '',
           creative_title: creative.title || '',
           thumbnail_url: creative.snapshot_url || '',
-          ad_snapshot_url: `https://www.facebook.com/ads/archive/render_ad/?id=${a.ad_id}&access_token=${token}`,
+          ad_snapshot_url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=596746546417726&selected_ad_ids=${a.ad_id}`,
+          preview_url: previewMap[a.ad_id] || '',
         }
       })
 
