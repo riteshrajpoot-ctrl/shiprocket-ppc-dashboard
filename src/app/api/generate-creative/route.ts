@@ -1,88 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
-  const { objective, audience, offer, tone, refCreative, refImage, adSide } = await req.json()
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'Missing API key' }, { status: 500 })
+  const { variant, adName, campaignContext, referenceImageUrl, adSide } = await req.json()
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return NextResponse.json({ error: 'Missing OPENAI_API_KEY' }, { status: 500 })
 
-  const contentBlocks: any[] = []
+  const hook = variant?.hook || ''
+  const cta = variant?.cta || ''
+  const angle = variant?.angle || ''
 
-  if (refImage) {
-    contentBlocks.push({
-      type: 'image',
-      source: { type: 'base64', media_type: 'image/jpeg', data: refImage }
-    })
-  }
+  const isDemand = adSide !== 'SUPPLY'
 
-  const refSection = (refCreative || refImage)
-    ? `\nREFERENCE CREATIVE:${refImage ? ' (see image above)' : ''}${refCreative ? `\n"${refCreative}"` : ''}
-Match its language style, Hinglish ratio, copy length, and messaging direction exactly.`
-    : ''
+  const sceneDescription = isDemand
+    ? `Scene: A happy small business owner or shopkeeper handing a package to a Shiprocket Quick 3-wheeler driver. The vehicle is loaded and ready to go. Setting: Indian shop/market area.`
+    : `Scene: A confident cartoon Indian auto-rickshaw driver in Shiprocket Quick yellow uniform, smiling, thumbs up. Yellow 3-wheeler beside him. Setting: Indian city street.`
 
-  const sideRule = adSide === 'DEMAND'
-    ? `\nCRITICAL — DEMAND-SIDE AD (talking to CUSTOMERS/BUSINESSES who want to book delivery):
-- Write about: fast delivery, affordable rates, easy booking, 3-wheeler for sending goods
-- NEVER mention: earning, joining as partner, driver recruitment, income, kamai
-- Good hooks: "3-Wheeler order in 60 seconds", "Bade orders? 3-Wheeler bhejo abhi"
-- Good CTAs: "Abhi Book Karo", "Pehli Delivery Free", "Order Karo Abhi"`
-    : adSide === 'SUPPLY'
-    ? `\nCRITICAL — SUPPLY-SIDE AD (talking to DRIVERS who want to earn money):
-- Write about: earning money, flexible work, guaranteed orders, daily payout
-- NEVER mention: booking delivery, customer experience, sending goods
-- Good hooks: "Roz kamao apne 3-Wheeler se", "Orders ready hain, driver chahiye"
-- Good CTAs: "Partner Bano Aaj", "Kamaana Shuru Karo", "Abhi Join Karo"`
-    : ''
+  const prompt = `Square mobile ad creative for "Shiprocket Quick" — Indian on-demand 3-wheeler delivery app.
 
-  const prompt = `You are a top performance creative writer for Shiprocket Quick — India's on-demand 3-wheeler delivery app.
+STYLE: Flat vector cartoon illustration. Bold, colorful. NOT photorealistic. Similar to Swiggy/Zomato illustrated ads.
 
-Brief:
-- Objective: ${objective}
-- Target audience: ${audience}
-- Key offer/USP: ${offer}
-- Tone: ${tone}
-${sideRule}
-${refSection}
+COMPOSITION:
+- Bright yellow (#FFD000) background with simple geometric shapes
+- ${sceneDescription}
+- Top-left corner: Small white rounded rectangle with purple "Shiprocket Quick" text
+
+TEXT ON IMAGE (exact text, clean typography):
+- Large bold white text center-top: "${hook}"
+- Bottom-center: Rounded purple (#6B21A8) pill button, white text: "${cta}"
 
 RULES:
-1. Hook: MAX 8 words. Instant curiosity or urgency. No generic openers.
-2. Body: MAX 2 short sentences. One problem, one solution.
-3. CTA: 3-5 words. Action verb first.
-4. Natural Hinglish. Not forced translation.
-5. Each variant must have a genuinely different angle.
-6. Always write "3-Wheeler" never "1-Wheeler".
-7. Use specific numbers if available in the offer.
+- Only yellow and purple colors
+- No extra text anywhere else
+- CTA button must look like a real rounded button
+- Clean professional ad layout
+- Angle/mood: ${angle}`
 
-Return ONLY valid JSON, no markdown:
-{
-  "variants": [
-    { "variant": 1, "format": "Video ad", "angle": "<2-3 words>", "hook": "<max 8 words>", "body": "<max 2 sentences>", "cta": "<3-5 words>" },
-    { "variant": 2, "format": "Carousel ad", "angle": "<2-3 words>", "hook": "<max 8 words>", "body": "<max 2 sentences>", "cta": "<3-5 words>" },
-    { "variant": 3, "format": "Static image", "angle": "<2-3 words>", "hook": "<max 8 words>", "body": "<max 2 sentences>", "cta": "<3-5 words>" }
-  ]
-}`
-
-  contentBlocks.push({ type: 'text', text: prompt })
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: contentBlocks }],
+      model: 'gpt-image-1',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      quality: 'high',
     }),
   })
 
   const data = await res.json()
-  const text = data.content?.[0]?.text || '{}'
-  const clean = text.replace(/```json|```/g, '').trim()
-  try {
-    return NextResponse.json(JSON.parse(clean))
-  } catch {
-    return NextResponse.json({ error: 'Parse failed', raw: text }, { status: 500 })
+
+  if (data.error) {
+    return NextResponse.json({ error: data.error.message }, { status: 400 })
   }
+
+  const b64 = data.data?.[0]?.b64_json
+  const url = data.data?.[0]?.url
+  const image = b64 ? `data:image/png;base64,${b64}` : url
+
+  return NextResponse.json({ image })
 }
