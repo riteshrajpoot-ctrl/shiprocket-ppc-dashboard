@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const adIds = insightsData.map((a: any) => a.ad_id).filter(Boolean)
 
     // Batch fetch ad creatives
-    const creativeMap: Record<string, { body: string; title: string; snapshot_url: string }> = {}
+    const creativeMap: Record<string, { body: string; title: string; snapshot_url: string; creative_id: string }> = {}
 
     if (adIds.length > 0) {
       // Fetch in batches of 20
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
         // Use batch request
         const batchReqs = batch.map((id: string) => ({
           method: 'GET',
-          relative_url: `${id}?fields=creative{body,title,thumbnail_url,object_story_spec}`
+          relative_url: `${id}?fields=creative{id,body,title,object_story_spec,image_url,thumbnail_url,effective_instagram_media_id,effective_object_story_id}`
         }))
 
         const batchRes = await fetch(`https://graph.facebook.com/v19.0/?batch=${encodeURIComponent(JSON.stringify(batchReqs))}&access_token=${token}&include_headers=false`, {
@@ -58,10 +58,48 @@ export async function GET(req: NextRequest) {
               try {
                 const adData = JSON.parse(item.body)
                 const creative = adData.creative || {}
+                // Priority: image_url (full res) > object_story_spec image > thumbnail_url (low res)
+                const fullImage =
+                  creative.image_url ||
+                  creative.object_story_spec?.link_data?.image_hash ||
+                  creative.object_story_spec?.photo_data?.url ||
+                  creative.thumbnail_url ||
+                  ''
                 creativeMap[batch[idx]] = {
-                  body: creative.body || creative.object_story_spec?.link_data?.message || '',
+                  body: creative.body || creative.object_story_spec?.link_data?.message || creative.object_story_spec?.video_data?.message || '',
                   title: creative.title || creative.object_story_spec?.link_data?.name || '',
-                  snapshot_url: creative.thumbnail_url || ''
+                  snapshot_url: fullImage,
+                  creative_id: creative.id || ''
+                }
+              } catch {}
+            }
+          })
+        }
+      }
+    }
+
+    // Second pass: for creatives missing full-size image, fetch via adcreatives node
+    const missingImage = Object.entries(creativeMap).filter(([, v]) => v.creative_id && !v.snapshot_url)
+    if (missingImage.length > 0) {
+      const creativeIds = missingImage.map(([, v]) => v.creative_id)
+      const batchSize2 = 20
+      for (let i = 0; i < creativeIds.length; i += batchSize2) {
+        const batch2 = creativeIds.slice(i, i + batchSize2)
+        const batchReqs2 = batch2.map((cid: string) => ({
+          method: 'GET',
+          relative_url: `${cid}?fields=image_url,thumbnail_url`
+        }))
+        const res2 = await fetch(`https://graph.facebook.com/v19.0/?batch=${encodeURIComponent(JSON.stringify(batchReqs2))}&access_token=${token}&include_headers=false`, { method: 'POST' })
+        const json2 = await res2.json()
+        if (Array.isArray(json2)) {
+          json2.forEach((item: any, idx: number) => {
+            if (item.code === 200) {
+              try {
+                const d = JSON.parse(item.body)
+                const adEntry = missingImage[i + idx]
+                if (adEntry) {
+                  const [adId] = adEntry
+                  creativeMap[adId].snapshot_url = d.image_url || d.thumbnail_url || ''
                 }
               } catch {}
             }
