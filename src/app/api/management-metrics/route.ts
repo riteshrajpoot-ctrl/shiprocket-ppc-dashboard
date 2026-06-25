@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const dateEnd = searchParams.get('date_end') || new Date().toISOString().split('T')[0]
 
   try {
+    // ── Step 1: Fetch Meta ad-level insights ──────────────────────────────
     const insightsUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
     insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_name,spend,impressions,clicks,ctr,cpc,actions')
     insightsUrl.searchParams.set('level', 'ad')
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     const activeAds = insightsData.filter((a: any) => Number(a.spend) > 0)
     const adIds = activeAds.map((a: any) => a.ad_id)
 
-    // Detect supply vs demand from app store URL
+    // ── Step 2: Detect supply vs demand from app store URL ────────────────
     const sideMap: Record<string, 'SUPPLY' | 'DEMAND'> = {}
     const batchSize = 20
     for (let i = 0; i < adIds.length; i += batchSize) {
@@ -56,9 +57,11 @@ export async function GET(req: NextRequest) {
       } catch {}
     }
 
-    // Aggregate by side
-    const supply = { spend: 0, impressions: 0, clicks: 0, installs: 0, campaigns: new Set<string>(), ads: [] as any[] }
-    const demand = { spend: 0, impressions: 0, clicks: 0, installs: 0, orders: 0, campaigns: new Set<string>(), ads: [] as any[] }
+    // ── Step 3: Aggregate by side ─────────────────────────────────────────
+    const supply = { spend: 0, impressions: 0, clicks: 0, installs: 0, campaigns: new Map<string, boolean>(), ads: [] as any[] }
+    const demand = { spend: 0, impressions: 0, clicks: 0, installs: 0, orders: 0, campaigns: new Map<string, boolean>(), ads: [] as any[] }
+    // Campaign-level spend for demand (for CPO matching)
+    const demandCampaignSpend: Record<string, number> = {}
 
     activeAds.forEach((a: any) => {
       const side = sideMap[a.ad_id] || 'DEMAND'
@@ -66,25 +69,25 @@ export async function GET(req: NextRequest) {
       const installs = Number(actions.find((x: any) => x.action_type === 'mobile_app_install')?.value ?? 0)
       const orders = Number(actions.find((x: any) => ['purchase', 'complete_registration', 'fb_mobile_purchase'].includes(x.action_type))?.value ?? 0)
       const spend = Number(a.spend)
-      const impressions = Number(a.impressions || 0)
-      const clicks = Number(a.clicks || 0)
-      const ctr = Number(a.ctr || 0)
 
       if (side === 'SUPPLY') {
         supply.spend += spend
-        supply.impressions += impressions
-        supply.clicks += clicks
+        supply.impressions += Number(a.impressions || 0)
+        supply.clicks += Number(a.clicks || 0)
         supply.installs += installs
-        supply.campaigns.add(a.campaign_name)
-        supply.ads.push({ name: a.ad_name, spend, installs, ctr, cpi: installs > 0 ? spend / installs : null })
+        supply.campaigns.set(a.campaign_name, true)
+        supply.ads.push({ name: a.ad_name, spend, installs, ctr: Number(a.ctr || 0), cpi: installs > 0 ? spend / installs : null })
       } else {
         demand.spend += spend
-        demand.impressions += impressions
-        demand.clicks += clicks
+        demand.impressions += Number(a.impressions || 0)
+        demand.clicks += Number(a.clicks || 0)
         demand.installs += installs
         demand.orders += orders
-        demand.campaigns.add(a.campaign_name)
-        demand.ads.push({ name: a.ad_name, spend, installs, ctr, cpi: installs > 0 ? spend / installs : null })
+        demand.campaigns.set(a.campaign_name, true)
+        demand.ads.push({ name: a.ad_name, campaign: a.campaign_name, spend, installs, ctr: Number(a.ctr || 0), cpi: installs > 0 ? spend / installs : null })
+        // Accumulate campaign-level spend
+        const campKey = (a.campaign_name || '').toLowerCase()
+        demandCampaignSpend[campKey] = (demandCampaignSpend[campKey] || 0) + spend
       }
     })
 
@@ -95,21 +98,22 @@ export async function GET(req: NextRequest) {
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
     const dayOfMonth = today.getDate()
     const monthPct = Math.round((dayOfMonth / daysInMonth) * 100)
-
     const totalSpend = supply.spend + demand.spend
     const supplyDailyRate = supply.spend / dayOfMonth
     const demandDailyRate = demand.spend / dayOfMonth
     const daysLeft = daysInMonth - dayOfMonth
 
-    // Fetch Branch Facebook first orders — exact same format as working /api/branch-metrics
+    // ── Step 4: Fetch Branch first orders per campaign (Facebook only) ────
     let branchOrders = 0
     let performanceSpend = 0
-    const performanceCampaigns: string[] = []
+    // Map: branch campaign name → first orders
+    const branchOrdersByCampaign: Record<string, number> = {}
 
     try {
       const branchKey = process.env.BRANCH_KEY
       const branchSecret = process.env.BRANCH_SECRET
       if (branchKey && branchSecret) {
+        // Chunk into 7-day windows
         const chunks: { start: string; end: string }[] = []
         const cursor = new Date(dateStart)
         const endD = new Date(dateEnd)
@@ -120,6 +124,7 @@ export async function GET(req: NextRequest) {
           chunks.push({ start: cursor.toISOString().split('T')[0], end: chunkEnd.toISOString().split('T')[0] })
           cursor.setDate(cursor.getDate() + 7)
         }
+
         const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
         for (let i = 0; i < chunks.length; i++) {
           if (i > 0) await sleep(600)
@@ -147,53 +152,25 @@ export async function GET(req: NextRequest) {
               for (const r of (data.results || [])) {
                 const result = r.result || {}
                 const partner = (result['last_attributed_touch_data_tilde_advertising_partner_name'] || '').toLowerCase()
-                const campaignRaw = result['last_attributed_touch_data_tilde_campaign'] || ''
-                const campaign = campaignRaw.toLowerCase()
+                const campaignRaw = (result['last_attributed_touch_data_tilde_campaign'] || '').trim()
+                const campaignNorm = campaignRaw.toLowerCase()
                 const orders = Number(result.total_count || 0)
                 const isFacebook = partner.includes('facebook')
-                const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
+                const isExcluded = campaignNorm.includes('_d_partner') || campaignNorm.includes('_brand')
                 if (isFacebook && !isExcluded && orders > 0) {
                   branchOrders += orders
-                  // Store exact campaign name as Branch returns it
-                  const exactName = campaignRaw.trim()
-                  if (!performanceCampaigns.includes(exactName)) {
-                    performanceCampaigns.push(exactName)
-                  }
+                  branchOrdersByCampaign[campaignNorm] = (branchOrdersByCampaign[campaignNorm] || 0) + orders
                 }
               }
             }
           } catch {}
         }
 
-        // Match Branch campaign names against Meta CAMPAIGN names (not ad names)
-        // Branch returns SR_Quick_3W_Test_13_May_26 = Meta campaign name
-        // Build campaign spend map from demand ads grouped by campaign
-        const metaCampaignSpend: Record<string, number> = {}
-        for (const ad of demand.ads) {
-          // ad.campaign is the Meta campaign name stored in demand aggregation
-          const campName = (ad as any).campaign || ''
-          if (campName) {
-            metaCampaignSpend[campName.toLowerCase()] = (metaCampaignSpend[campName.toLowerCase()] || 0) + ad.spend
-          }
-        }
-
-        // Also build from the raw insightsData campaign names
-        for (const a of activeAds) {
-          const side = sideMap[a.ad_id] || 'DEMAND'
-          if (side === 'DEMAND') {
-            const campName = (a.campaign_name || '').toLowerCase()
-            if (!metaCampaignSpend[campName]) metaCampaignSpend[campName] = 0
-            metaCampaignSpend[campName] += Number(a.spend || 0)
-          }
-        }
-
-        // Now match performance campaigns from Branch against Meta campaign names
-        for (const pc of performanceCampaigns) {
-          const pcNorm = pc.toLowerCase()
-          // Find matching Meta campaign
-          for (const [metaCamp, spend] of Object.entries(metaCampaignSpend)) {
-            if (metaCamp.includes(pcNorm) || pcNorm.includes(metaCamp) ||
-                metaCamp.replace(/[_\s]/g, '') === pcNorm.replace(/[_\s]/g, '')) {
+        // Match Branch campaigns → Meta campaign spend
+        for (const [branchCamp, _orders] of Object.entries(branchOrdersByCampaign)) {
+          for (const [metaCamp, spend] of Object.entries(demandCampaignSpend)) {
+            if (metaCamp.includes(branchCamp) || branchCamp.includes(metaCamp) ||
+                metaCamp.replace(/[_\s]/g, '') === branchCamp.replace(/[_\s]/g, '')) {
               performanceSpend += spend
               break
             }
@@ -202,9 +179,34 @@ export async function GET(req: NextRequest) {
       }
     } catch (_e) {}
 
-    // CPO = spend from performance campaigns only ÷ first orders from those campaigns
+    // ── Step 5: Build demand top campaigns by first orders ────────────────
+    // Match each Meta campaign to Branch orders
+    const demandTopCampaigns = Array.from(demand.campaigns.keys()).map(campName => {
+      const campNorm = campName.toLowerCase()
+      const campSpend = demandCampaignSpend[campNorm] || 0
+      // Find matching Branch orders
+      let campOrders = 0
+      for (const [branchCamp, orders] of Object.entries(branchOrdersByCampaign)) {
+        if (campNorm.includes(branchCamp) || branchCamp.includes(campNorm) ||
+            campNorm.replace(/[_\s]/g, '') === branchCamp.replace(/[_\s]/g, '')) {
+          campOrders += orders
+        }
+      }
+      const campInstalls = demand.ads.filter(a => a.campaign === campName).reduce((s, a) => s + a.installs, 0)
+      return {
+        name: campName,
+        spend: Math.round(campSpend),
+        installs: campInstalls,
+        orders: campOrders,
+        cpo: campOrders > 0 ? Math.round(campSpend / campOrders) : null,
+        ctr: demand.ads.filter(a => a.campaign === campName).length > 0
+          ? (demand.ads.filter(a => a.campaign === campName).reduce((s, a) => s + a.ctr, 0) / demand.ads.filter(a => a.campaign === campName).length).toFixed(2)
+          : '0',
+      }
+    }).sort((a, b) => b.orders - a.orders || b.installs - a.installs)
+
     const cpoDenominator = performanceSpend > 0 ? performanceSpend : demand.spend
-    const cpo = branchOrders > 0 ? Math.round(cpoDenominator / branchOrders) : demand.orders > 0 ? Math.round(demand.spend / demand.orders) : null
+    const cpo = branchOrders > 0 ? Math.round(cpoDenominator / branchOrders) : null
 
     return NextResponse.json({
       dateStart, dateEnd, dayOfMonth, daysInMonth, monthPct,
@@ -217,7 +219,7 @@ export async function GET(req: NextRequest) {
         ctr: supply.impressions > 0 ? ((supply.clicks / supply.impressions) * 100).toFixed(2) : '0',
         cpi: supply.installs > 0 ? Math.round(supply.spend / supply.installs) : null,
         cpc: supply.clicks > 0 ? Math.round(supply.spend / supply.clicks) : null,
-        pacingPct: monthPct > 0 ? Math.round((supply.spend / totalSpend) * 100) : 0,
+        pacingPct: totalSpend > 0 ? Math.round((supply.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(supplyDailyRate),
         projectedMonthEnd: Math.round(supply.spend + supplyDailyRate * daysLeft),
         projectedInstalls: supply.installs > 0 ? Math.round((supply.spend + supplyDailyRate * daysLeft) / (supply.spend / supply.installs)) : 0,
@@ -231,15 +233,16 @@ export async function GET(req: NextRequest) {
         installs: demand.installs,
         orders: branchOrders > 0 ? branchOrders : demand.orders,
         campaigns: demand.campaigns.size,
-        performanceCampaigns: performanceCampaigns.length,
         ctr: demand.impressions > 0 ? ((demand.clicks / demand.impressions) * 100).toFixed(2) : '0',
         cpi: demand.installs > 0 ? Math.round(demand.spend / demand.installs) : null,
         cpo,
         cpc: demand.clicks > 0 ? Math.round(demand.spend / demand.clicks) : null,
-        pacingPct: monthPct > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
+        pacingPct: totalSpend > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(demandDailyRate),
         projectedMonthEnd: Math.round(demand.spend + demandDailyRate * daysLeft),
         projectedOrders: branchOrders > 0 && cpoDenominator > 0 ? Math.round((cpoDenominator + demandDailyRate * daysLeft) / (cpoDenominator / branchOrders)) : 0,
+        // Top campaigns by first orders (not installs) for director view
+        topCampaigns: demandTopCampaigns.slice(0, 5),
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
         branchSource: branchOrders > 0,
       },
@@ -247,8 +250,8 @@ export async function GET(req: NextRequest) {
         spend: Math.round(totalSpend),
         installs: supply.installs + demand.installs,
         impressions: supply.impressions + demand.impressions,
-        supplySharePct: Math.round((supply.spend / totalSpend) * 100),
-        demandSharePct: Math.round((demand.spend / totalSpend) * 100),
+        supplySharePct: totalSpend > 0 ? Math.round((supply.spend / totalSpend) * 100) : 0,
+        demandSharePct: totalSpend > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
         daysLeft,
       }
     })
