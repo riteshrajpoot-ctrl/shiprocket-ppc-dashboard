@@ -101,39 +101,36 @@ export async function GET(req: NextRequest) {
     const demandDailyRate = demand.spend / dayOfMonth
     const daysLeft = daysInMonth - dayOfMonth
 
-    // Fetch Branch first orders for Facebook/Meta demand-side campaigns
+    // Fetch Branch first orders — using Basic Auth (same as working branch-metrics route)
     let branchOrders = 0
     try {
       const branchKey = process.env.BRANCH_KEY
       const branchSecret = process.env.BRANCH_SECRET
       if (branchKey && branchSecret) {
-        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
+        const credentials = Buffer.from(`${branchKey}:${branchSecret}`).toString('base64')
+
+        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'accept': 'application/json',
+            'Authorization': `Basic ${credentials}`,
           },
           body: JSON.stringify({
-            branch_key: branchKey,
-            branch_secret: branchSecret,
             start_date: dateStart,
             end_date: dateEnd,
             data_source: 'eo_custom_event',
             aggregation: 'total_count',
-            dimensions: [
-              'last_attributed_touch_data_tilde_advertising_partner_name',
-            ],
+            dimensions: ['last_attributed_touch_data_tilde_advertising_partner_name'],
             filters: { name: ['first_order_created_fe'] },
             granularity: 'all',
           }),
         })
+
         if (branchRes.ok) {
           const branchData = await branchRes.json()
           const rows: any[] = branchData.results || []
           rows.forEach((row: any) => {
             const partner = (row.dimensions?.last_attributed_touch_data_tilde_advertising_partner_name || '').toLowerCase()
-            // Branch Facebook filter = demand side only (matches Branch dashboard Facebook filter)
-            // All 5 Facebook campaigns are demand side — no further filtering needed
             if (partner === 'facebook' || partner.includes('facebook')) {
               branchOrders += Number(row.result?.total_count || 0)
             }
