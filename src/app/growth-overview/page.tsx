@@ -35,7 +35,7 @@ export default function GrowthOverviewPage() {
   const [dateStart, setDateStart] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
   })
-  const [dateEnd] = useState(() => new Date().toISOString().split('T')[0])
+  const [dateEnd, setDateEnd] = useState(() => new Date().toISOString().split('T')[0])
 
   // Tool states
   const [allocPct, setAllocPct] = useState(71)
@@ -390,9 +390,10 @@ export default function GrowthOverviewPage() {
             <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>Demand vs Supply — separated</p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} style={{ padding: '5px 10px', border: '.5px solid #E5E7EB', borderRadius: 6, fontSize: 13 }} />
-          <span style={{ fontSize: 12, color: '#9CA3AF' }}>to {dateEnd}</span>
+          <span style={{ fontSize: 12, color: '#9CA3AF' }}>to</span>
+          <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} style={{ padding: '5px 10px', border: '.5px solid #E5E7EB', borderRadius: 6, fontSize: 13 }} />
           <button onClick={fetchData} style={{ padding: '6px 16px', borderRadius: 6, background: '#4F46E5', color: '#fff', border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Refresh</button>
         </div>
       </div>
