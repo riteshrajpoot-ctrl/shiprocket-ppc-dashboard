@@ -101,6 +101,52 @@ export async function GET(req: NextRequest) {
     const demandDailyRate = demand.spend / dayOfMonth
     const daysLeft = daysInMonth - dayOfMonth
 
+    // Fetch Branch first orders for Facebook/Meta demand-side campaigns
+    let branchOrders = 0
+    try {
+      const branchKey = process.env.BRANCH_KEY
+      const branchSecret = process.env.BRANCH_SECRET
+      if (branchKey && branchSecret) {
+        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            branch_key: branchKey,
+            branch_secret: branchSecret,
+            start_date: dateStart,
+            end_date: dateEnd,
+            data_source: 'eo_custom_event',
+            dimensions: [
+              'last_attributed_touch_data_tilde_advertising_partner_name',
+              'last_attributed_touch_data_tilde_campaign',
+            ],
+            filters: { 'name': ['first_order_created_fe'] },
+            aggregation: 'unique_count',
+            granularity: 'all',
+          }),
+        })
+        if (branchRes.ok) {
+          const branchData = await branchRes.json()
+          const rows: any[] = branchData.results || []
+          rows.forEach((row: any) => {
+            const partner = (row.last_attributed_touch_data_tilde_advertising_partner_name || '').toLowerCase()
+            const campaign = (row.last_attributed_touch_data_tilde_campaign || '').toLowerCase()
+            const isFacebook = partner.includes('facebook') || partner.includes('meta')
+            // Exact rules from campaign naming convention:
+            // SR_Quick_D_Partner_* = Supply side → exclude
+            // SR_Quick_Brand_* = Brand campaign → exclude
+            // Everything else SR_Quick_* from Facebook = Demand side → include
+            const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
+            if (isFacebook && !isExcluded) {
+              branchOrders += Number(row.unique_count || row.total_count || 0)
+            }
+          })
+        }
+      }
+    } catch (_e) {
+      // Branch fetch failed silently
+    }
+
     return NextResponse.json({
       dateStart, dateEnd, dayOfMonth, daysInMonth, monthPct,
       supply: {
@@ -123,17 +169,18 @@ export async function GET(req: NextRequest) {
         impressions: demand.impressions,
         clicks: demand.clicks,
         installs: demand.installs,
-        orders: demand.orders,
+        orders: branchOrders > 0 ? branchOrders : demand.orders,
         campaigns: demand.campaigns.size,
         ctr: demand.impressions > 0 ? ((demand.clicks / demand.impressions) * 100).toFixed(2) : '0',
         cpi: demand.installs > 0 ? Math.round(demand.spend / demand.installs) : null,
-        cpo: demand.orders > 0 ? Math.round(demand.spend / demand.orders) : null,
+        cpo: branchOrders > 0 ? Math.round(demand.spend / branchOrders) : demand.orders > 0 ? Math.round(demand.spend / demand.orders) : null,
         cpc: demand.clicks > 0 ? Math.round(demand.spend / demand.clicks) : null,
         pacingPct: monthPct > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(demandDailyRate),
         projectedMonthEnd: Math.round(demand.spend + demandDailyRate * daysLeft),
-        projectedOrders: demand.orders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / demand.orders)) : 0,
+        projectedOrders: branchOrders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / branchOrders)) : demand.orders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / demand.orders)) : 0,
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
+        branchSource: branchOrders > 0,
       },
       total: {
         spend: Math.round(totalSpend),
