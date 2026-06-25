@@ -165,17 +165,39 @@ export async function GET(req: NextRequest) {
           } catch {}
         }
 
-        // Sum spend from Meta ads whose names exactly match Branch campaign names
-        // Branch campaign name = Meta campaign name (same naming convention SR_Quick_*)
-        // Meta ad name contains the campaign name — do exact substring match
+        // Match Branch campaign names against Meta CAMPAIGN names (not ad names)
+        // Branch returns SR_Quick_3W_Test_13_May_26 = Meta campaign name
+        // Build campaign spend map from demand ads grouped by campaign
+        const metaCampaignSpend: Record<string, number> = {}
         for (const ad of demand.ads) {
-          const adName = ad.name  // e.g. "Quick_3W_On_Demand" or "3W_Test_13_May_26"
-          const matched = performanceCampaigns.some(pc => {
-            // Exact match: Branch campaign name appears in Meta ad name or vice versa
-            return adName.toLowerCase().includes(pc.toLowerCase()) ||
-                   pc.toLowerCase().includes(adName.toLowerCase())
-          })
-          if (matched) performanceSpend += ad.spend
+          // ad.campaign is the Meta campaign name stored in demand aggregation
+          const campName = (ad as any).campaign || ''
+          if (campName) {
+            metaCampaignSpend[campName.toLowerCase()] = (metaCampaignSpend[campName.toLowerCase()] || 0) + ad.spend
+          }
+        }
+
+        // Also build from the raw insightsData campaign names
+        for (const a of activeAds) {
+          const side = sideMap[a.ad_id] || 'DEMAND'
+          if (side === 'DEMAND') {
+            const campName = (a.campaign_name || '').toLowerCase()
+            if (!metaCampaignSpend[campName]) metaCampaignSpend[campName] = 0
+            metaCampaignSpend[campName] += Number(a.spend || 0)
+          }
+        }
+
+        // Now match performance campaigns from Branch against Meta campaign names
+        for (const pc of performanceCampaigns) {
+          const pcNorm = pc.toLowerCase()
+          // Find matching Meta campaign
+          for (const [metaCamp, spend] of Object.entries(metaCampaignSpend)) {
+            if (metaCamp.includes(pcNorm) || pcNorm.includes(metaCamp) ||
+                metaCamp.replace(/[_\s]/g, '') === pcNorm.replace(/[_\s]/g, '')) {
+              performanceSpend += spend
+              break
+            }
+          }
         }
       }
     } catch (_e) {}
@@ -227,7 +249,17 @@ export async function GET(req: NextRequest) {
         cpoDenominator: Math.round(cpoDenominator),
         cpo,
         branchCampaignsFound: performanceCampaigns,
-        metaAdsAll: demand.ads.map(a => ({ name: a.name, spend: Math.round(a.spend) })),
+        metaCampaignSpendMap: Object.fromEntries(
+          Object.entries(
+            activeAds
+              .filter((a: any) => (sideMap[a.ad_id] || 'DEMAND') === 'DEMAND')
+              .reduce((acc: any, a: any) => {
+                const k = (a.campaign_name || '').toLowerCase()
+                acc[k] = (acc[k] || 0) + Number(a.spend || 0)
+                return acc
+              }, {})
+          ).map(([k, v]) => [k, Math.round(v as number)])
+        ),
         metaAdsMatched: demand.ads
           .filter(ad => performanceCampaigns.some(pc =>
             ad.name.toLowerCase().includes(pc.toLowerCase()) ||
