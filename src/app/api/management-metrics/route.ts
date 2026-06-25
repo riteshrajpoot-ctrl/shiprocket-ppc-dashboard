@@ -243,30 +243,6 @@ export async function GET(req: NextRequest) {
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
         branchSource: branchOrders > 0,
       },
-      debug: {
-        branchOrders,
-        performanceSpend: Math.round(performanceSpend),
-        cpoDenominator: Math.round(cpoDenominator),
-        cpo,
-        branchCampaignsFound: performanceCampaigns,
-        metaCampaignSpendMap: Object.fromEntries(
-          Object.entries(
-            activeAds
-              .filter((a: any) => (sideMap[a.ad_id] || 'DEMAND') === 'DEMAND')
-              .reduce((acc: any, a: any) => {
-                const k = (a.campaign_name || '').toLowerCase()
-                acc[k] = (acc[k] || 0) + Number(a.spend || 0)
-                return acc
-              }, {})
-          ).map(([k, v]) => [k, Math.round(v as number)])
-        ),
-        metaAdsMatched: demand.ads
-          .filter(ad => performanceCampaigns.some(pc =>
-            ad.name.toLowerCase().includes(pc.toLowerCase()) ||
-            pc.toLowerCase().includes(ad.name.toLowerCase())
-          ))
-          .map(a => ({ name: a.name, spend: Math.round(a.spend) })),
-      },
       total: {
         spend: Math.round(totalSpend),
         installs: supply.installs + demand.installs,
