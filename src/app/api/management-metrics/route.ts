@@ -221,6 +221,20 @@ export async function GET(req: NextRequest) {
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
         branchSource: branchOrders > 0,
       },
+      debug: {
+        branchOrders,
+        performanceSpend: Math.round(performanceSpend),
+        cpoDenominator: Math.round(cpoDenominator),
+        cpo,
+        branchCampaignsFound: performanceCampaigns,
+        metaAdsAll: demand.ads.map(a => ({ name: a.name, spend: Math.round(a.spend) })),
+        metaAdsMatched: demand.ads
+          .filter(ad => performanceCampaigns.some(pc =>
+            ad.name.toLowerCase().includes(pc.toLowerCase()) ||
+            pc.toLowerCase().includes(ad.name.toLowerCase())
+          ))
+          .map(a => ({ name: a.name, spend: Math.round(a.spend) })),
+      },
       total: {
         spend: Math.round(totalSpend),
         installs: supply.installs + demand.installs,
