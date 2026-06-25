@@ -103,6 +103,9 @@ export async function GET(req: NextRequest) {
 
     // Fetch Branch Facebook first orders — exact same format as working /api/branch-metrics
     let branchOrders = 0
+    let performanceSpend = 0  // spend from campaigns that actually generated orders
+    const performanceCampaigns = new Set<string>()  // campaign names that generated orders
+
     try {
       const branchKey = process.env.BRANCH_KEY
       const branchSecret = process.env.BRANCH_SECRET
@@ -144,18 +147,39 @@ export async function GET(req: NextRequest) {
               for (const r of (data.results || [])) {
                 const result = r.result || {}
                 const partner = (result['last_attributed_touch_data_tilde_advertising_partner_name'] || '').toLowerCase()
-                const campaign = (result['last_attributed_touch_data_tilde_campaign'] || '').toLowerCase()
+                const campaignRaw = result['last_attributed_touch_data_tilde_campaign'] || ''
+                const campaign = campaignRaw.toLowerCase()
+                const orders = Number(result.total_count || 0)
                 const isFacebook = partner.includes('facebook')
                 const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
-                if (isFacebook && !isExcluded) {
-                  branchOrders += Number(result.total_count || 0)
+                if (isFacebook && !isExcluded && orders > 0) {
+                  branchOrders += orders
+                  performanceCampaigns.add(campaignRaw.toLowerCase().trim())
                 }
               }
             }
           } catch {}
         }
+
+        // Now sum spend from Meta for all campaigns that generated orders
+        // Match Branch campaign name → Meta ad name (both use same SR_Quick_* naming)
+        for (const ad of demand.ads) {
+          const adNameNorm = ad.name.toLowerCase().trim()
+          for (const pc of performanceCampaigns) {
+            // Campaign name from Branch matches ad name from Meta
+            if (adNameNorm.includes(pc) || pc.includes(adNameNorm) ||
+                adNameNorm.replace(/[_\s]/g, '').includes(pc.replace(/[_\s]/g, '').substring(0, 18))) {
+              performanceSpend += ad.spend
+              break
+            }
+          }
+        }
       }
     } catch (_e) {}
+
+    // CPO = spend from performance campaigns only ÷ first orders from those campaigns
+    const cpoDenominator = performanceSpend > 0 ? performanceSpend : demand.spend
+    const cpo = branchOrders > 0 ? Math.round(cpoDenominator / branchOrders) : demand.orders > 0 ? Math.round(demand.spend / demand.orders) : null
 
     return NextResponse.json({
       dateStart, dateEnd, dayOfMonth, daysInMonth, monthPct,
@@ -176,19 +200,21 @@ export async function GET(req: NextRequest) {
       },
       demand: {
         spend: Math.round(demand.spend),
+        performanceSpend: Math.round(performanceSpend > 0 ? performanceSpend : demand.spend),
         impressions: demand.impressions,
         clicks: demand.clicks,
         installs: demand.installs,
         orders: branchOrders > 0 ? branchOrders : demand.orders,
         campaigns: demand.campaigns.size,
+        performanceCampaigns: performanceCampaigns.size,
         ctr: demand.impressions > 0 ? ((demand.clicks / demand.impressions) * 100).toFixed(2) : '0',
         cpi: demand.installs > 0 ? Math.round(demand.spend / demand.installs) : null,
-        cpo: branchOrders > 0 ? Math.round(demand.spend / branchOrders) : demand.orders > 0 ? Math.round(demand.spend / demand.orders) : null,
+        cpo,
         cpc: demand.clicks > 0 ? Math.round(demand.spend / demand.clicks) : null,
         pacingPct: monthPct > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(demandDailyRate),
         projectedMonthEnd: Math.round(demand.spend + demandDailyRate * daysLeft),
-        projectedOrders: branchOrders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / branchOrders)) : demand.orders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / demand.orders)) : 0,
+        projectedOrders: branchOrders > 0 && cpoDenominator > 0 ? Math.round((cpoDenominator + demandDailyRate * daysLeft) / (cpoDenominator / branchOrders)) : 0,
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
         branchSource: branchOrders > 0,
       },
