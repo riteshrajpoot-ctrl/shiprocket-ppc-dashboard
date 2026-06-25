@@ -154,8 +154,10 @@ export async function GET(req: NextRequest) {
                 const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
                 if (isFacebook && !isExcluded && orders > 0) {
                   branchOrders += orders
-                  if (!performanceCampaigns.includes(campaignRaw.toLowerCase().trim())) {
-                    performanceCampaigns.push(campaignRaw.toLowerCase().trim())
+                  // Store exact campaign name as Branch returns it
+                  const exactName = campaignRaw.trim()
+                  if (!performanceCampaigns.includes(exactName)) {
+                    performanceCampaigns.push(exactName)
                   }
                 }
               }
@@ -163,13 +165,16 @@ export async function GET(req: NextRequest) {
           } catch {}
         }
 
-        // Sum spend from Meta for all campaigns that generated orders
+        // Sum spend from Meta ads whose names exactly match Branch campaign names
+        // Branch campaign name = Meta campaign name (same naming convention SR_Quick_*)
+        // Meta ad name contains the campaign name — do exact substring match
         for (const ad of demand.ads) {
-          const adNameNorm = ad.name.toLowerCase().trim()
-          const matched = Array.from(performanceCampaigns).some(pc =>
-            adNameNorm.includes(pc) || pc.includes(adNameNorm) ||
-            adNameNorm.replace(/[_\s]/g, '').includes(pc.replace(/[_\s]/g, '').substring(0, 18))
-          )
+          const adName = ad.name  // e.g. "Quick_3W_On_Demand" or "3W_Test_13_May_26"
+          const matched = performanceCampaigns.some(pc => {
+            // Exact match: Branch campaign name appears in Meta ad name or vice versa
+            return adName.toLowerCase().includes(pc.toLowerCase()) ||
+                   pc.toLowerCase().includes(adName.toLowerCase())
+          })
           if (matched) performanceSpend += ad.spend
         }
       }
