@@ -101,45 +101,61 @@ export async function GET(req: NextRequest) {
     const demandDailyRate = demand.spend / dayOfMonth
     const daysLeft = daysInMonth - dayOfMonth
 
-    // Fetch Branch first orders — using Basic Auth (same as working branch-metrics route)
+    // Fetch Branch Facebook first orders — exact same format as working /api/branch-metrics
     let branchOrders = 0
     try {
       const branchKey = process.env.BRANCH_KEY
       const branchSecret = process.env.BRANCH_SECRET
       if (branchKey && branchSecret) {
-        const credentials = Buffer.from(`${branchKey}:${branchSecret}`).toString('base64')
-
-        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Basic ${credentials}`,
-          },
-          body: JSON.stringify({
-            start_date: dateStart,
-            end_date: dateEnd,
-            data_source: 'eo_custom_event',
-            aggregation: 'total_count',
-            dimensions: ['last_attributed_touch_data_tilde_advertising_partner_name'],
-            filters: { name: ['first_order_created_fe'] },
-            granularity: 'all',
-          }),
-        })
-
-        if (branchRes.ok) {
-          const branchData = await branchRes.json()
-          const rows: any[] = branchData.results || []
-          rows.forEach((row: any) => {
-            const partner = (row.dimensions?.last_attributed_touch_data_tilde_advertising_partner_name || '').toLowerCase()
-            if (partner === 'facebook' || partner.includes('facebook')) {
-              branchOrders += Number(row.result?.total_count || 0)
+        const chunks: { start: string; end: string }[] = []
+        const cursor = new Date(dateStart)
+        const endD = new Date(dateEnd)
+        while (cursor <= endD) {
+          const chunkEnd = new Date(cursor)
+          chunkEnd.setDate(chunkEnd.getDate() + 6)
+          if (chunkEnd > endD) chunkEnd.setTime(endD.getTime())
+          chunks.push({ start: cursor.toISOString().split('T')[0], end: chunkEnd.toISOString().split('T')[0] })
+          cursor.setDate(cursor.getDate() + 7)
+        }
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+        for (let i = 0; i < chunks.length; i++) {
+          if (i > 0) await sleep(600)
+          try {
+            const res = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({
+                branch_key: branchKey,
+                branch_secret: branchSecret,
+                start_date: chunks[i].start,
+                end_date: chunks[i].end,
+                data_source: 'eo_custom_event',
+                aggregation: 'total_count',
+                dimensions: [
+                  'last_attributed_touch_data_tilde_campaign',
+                  'last_attributed_touch_data_tilde_advertising_partner_name',
+                ],
+                filters: { name: ['first_order_created_fe'] },
+                granularity: 'all',
+              }),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              for (const r of (data.results || [])) {
+                const result = r.result || {}
+                const partner = (result['last_attributed_touch_data_tilde_advertising_partner_name'] || '').toLowerCase()
+                const campaign = (result['last_attributed_touch_data_tilde_campaign'] || '').toLowerCase()
+                const isFacebook = partner.includes('facebook')
+                const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
+                if (isFacebook && !isExcluded) {
+                  branchOrders += Number(result.total_count || 0)
+                }
+              }
             }
-          })
+          } catch {}
         }
       }
-    } catch (_e) {
-      // Branch fetch failed silently
-    }
+    } catch (_e) {}
 
     return NextResponse.json({
       dateStart, dateEnd, dayOfMonth, daysInMonth, monthPct,
