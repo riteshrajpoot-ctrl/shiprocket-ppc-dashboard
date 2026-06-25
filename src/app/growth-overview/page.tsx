@@ -15,6 +15,7 @@ interface SideData {
   dailyRate: number; projectedMonthEnd: number
   projectedInstalls?: number; projectedOrders?: number
   topAds: { name: string; spend: number; installs: number; ctr: number; cpi: number | null }[]
+  topCampaigns?: { name: string; spend: number; installs: number; orders: number; cpo: number | null; ctr: string }[]
 }
 interface MgmtData {
   dateStart: string; dateEnd: string; dayOfMonth: number
@@ -99,26 +100,48 @@ export default function GrowthOverviewPage() {
     )
   }
 
-  const TopAds = ({ ads, side }: { ads: SideData['topAds']; side: 'supply' | 'demand' }) => (
+  const TopAds = ({ ads, side, topCampaigns }: { ads: SideData['topAds']; side: 'supply' | 'demand'; topCampaigns?: SideData['topCampaigns'] }) => (
     <div>
-      <p style={{ fontSize: 10, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>Top ads by installs</p>
-      {ads.slice(0, 4).map((ad, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '.5px solid #F3F4F6' }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: '#9CA3AF', width: 14, flexShrink: 0 }}>{i + 1}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.name}</p>
-            <p style={{ fontSize: 10, color: '#9CA3AF', margin: 0 }}>{fmtK(ad.spend)} · {Number(ad.ctr).toFixed(2)}% CTR</p>
-          </div>
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0 }}>{fmt(ad.installs)}</p>
-            {ad.cpi && (
-              <p style={{ fontSize: 10, color: ad.cpi < 15 ? '#059669' : ad.cpi < 40 ? '#D97706' : '#DC2626', margin: 0 }}>
-                ₹{ad.cpi} CPI
-              </p>
-            )}
-          </div>
-        </div>
-      ))}
+      {side === 'demand' && topCampaigns && topCampaigns.length > 0 ? (
+        <>
+          <p style={{ fontSize: 10, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>Top campaigns by first orders</p>
+          {topCampaigns.slice(0, 5).map((c, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '.5px solid #F3F4F6' }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#9CA3AF', width: 14, flexShrink: 0 }}>{i + 1}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</p>
+                <p style={{ fontSize: 10, color: '#9CA3AF', margin: 0 }}>{fmtK(c.spend)} spend · {c.ctr}% CTR</p>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0 }}>
+                  {c.orders > 0 ? `${fmt(c.orders)} orders` : `${fmt(c.installs)} installs`}
+                </p>
+                {c.cpo
+                  ? <p style={{ fontSize: 10, color: c.cpo < DEMAND_CPO_TARGET ? '#059669' : '#DC2626', margin: 0 }}>₹{c.cpo} CPO</p>
+                  : <p style={{ fontSize: 10, color: '#9CA3AF', margin: 0 }}>no orders yet</p>
+                }
+              </div>
+            </div>
+          ))}
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 10, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>Top ads by installs</p>
+          {ads.slice(0, 4).map((ad, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '.5px solid #F3F4F6' }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#9CA3AF', width: 14, flexShrink: 0 }}>{i + 1}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.name}</p>
+                <p style={{ fontSize: 10, color: '#9CA3AF', margin: 0 }}>{fmtK(ad.spend)} · {Number(ad.ctr).toFixed(2)}% CTR</p>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#111827', margin: 0 }}>{fmt(ad.installs)}</p>
+                {ad.cpi && <p style={{ fontSize: 10, color: ad.cpi < 15 ? '#059669' : ad.cpi < 40 ? '#D97706' : '#DC2626', margin: 0 }}>₹{ad.cpi} CPI</p>}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 
@@ -516,7 +539,7 @@ export default function GrowthOverviewPage() {
                         </div>
                       </div>
 
-                      <TopAds ads={m.topAds} side={side} />
+                      <TopAds ads={m.topAds} side={side} topCampaigns={m.topCampaigns} />
                     </div>
                   </div>
                 )
