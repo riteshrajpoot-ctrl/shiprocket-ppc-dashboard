@@ -107,21 +107,23 @@ export async function GET(req: NextRequest) {
       const branchKey = process.env.BRANCH_KEY
       const branchSecret = process.env.BRANCH_SECRET
       if (branchKey && branchSecret) {
-        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics', {
+        const branchRes = await fetch('https://api2.branch.io/v1/query/analytics?limit=100', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'accept': 'application/json',
+          },
           body: JSON.stringify({
             branch_key: branchKey,
             branch_secret: branchSecret,
             start_date: dateStart,
             end_date: dateEnd,
             data_source: 'eo_custom_event',
+            aggregation: 'total_count',
             dimensions: [
               'last_attributed_touch_data_tilde_advertising_partner_name',
-              'last_attributed_touch_data_tilde_campaign',
             ],
-            filters: { 'name': ['first_order_created_fe'] },
-            aggregation: 'unique_count',
+            filters: { name: ['first_order_created_fe'] },
             granularity: 'all',
           }),
         })
@@ -129,16 +131,11 @@ export async function GET(req: NextRequest) {
           const branchData = await branchRes.json()
           const rows: any[] = branchData.results || []
           rows.forEach((row: any) => {
-            const partner = (row.last_attributed_touch_data_tilde_advertising_partner_name || '').toLowerCase()
-            const campaign = (row.last_attributed_touch_data_tilde_campaign || '').toLowerCase()
-            const isFacebook = partner.includes('facebook') || partner.includes('meta')
-            // Exact rules from campaign naming convention:
-            // SR_Quick_D_Partner_* = Supply side → exclude
-            // SR_Quick_Brand_* = Brand campaign → exclude
-            // Everything else SR_Quick_* from Facebook = Demand side → include
-            const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
-            if (isFacebook && !isExcluded) {
-              branchOrders += Number(row.unique_count || row.total_count || 0)
+            const partner = (row.dimensions?.last_attributed_touch_data_tilde_advertising_partner_name || '').toLowerCase()
+            // Branch Facebook filter = demand side only (matches Branch dashboard Facebook filter)
+            // All 5 Facebook campaigns are demand side — no further filtering needed
+            if (partner === 'facebook' || partner.includes('facebook')) {
+              branchOrders += Number(row.result?.total_count || 0)
             }
           })
         }
