@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
         pacingPct: monthPct > 0 ? Math.round((supply.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(supplyDailyRate),
         projectedMonthEnd: Math.round(supply.spend + supplyDailyRate * daysLeft),
-        projectedInstalls: supply.cpi ? Math.round((supply.spend + supplyDailyRate * daysLeft) / (supply.spend / supply.installs)) : supply.installs,
+        projectedInstalls: supply.installs > 0 ? Math.round((supply.spend + supplyDailyRate * daysLeft) / (supply.spend / supply.installs)) : 0,
         topAds: supply.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
       },
       demand: {
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
         pacingPct: monthPct > 0 ? Math.round((demand.spend / totalSpend) * 100) : 0,
         dailyRate: Math.round(demandDailyRate),
         projectedMonthEnd: Math.round(demand.spend + demandDailyRate * daysLeft),
-        projectedOrders: demand.cpo ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / demand.orders)) : demand.orders,
+        projectedOrders: demand.orders > 0 ? Math.round((demand.spend + demandDailyRate * daysLeft) / (demand.spend / demand.orders)) : 0,
         topAds: demand.ads.slice(0, 5).map(a => ({ ...a, cpi: a.cpi ? Math.round(a.cpi) : null })),
       },
       total: {
