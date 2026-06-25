@@ -103,8 +103,8 @@ export async function GET(req: NextRequest) {
 
     // Fetch Branch Facebook first orders — exact same format as working /api/branch-metrics
     let branchOrders = 0
-    let performanceSpend = 0  // spend from campaigns that actually generated orders
-    const performanceCampaigns = new Set<string>()  // campaign names that generated orders
+    let performanceSpend = 0
+    const performanceCampaigns: string[] = []
 
     try {
       const branchKey = process.env.BRANCH_KEY
@@ -154,25 +154,23 @@ export async function GET(req: NextRequest) {
                 const isExcluded = campaign.includes('_d_partner') || campaign.includes('_brand')
                 if (isFacebook && !isExcluded && orders > 0) {
                   branchOrders += orders
-                  performanceCampaigns.add(campaignRaw.toLowerCase().trim())
+                  if (!performanceCampaigns.includes(campaignRaw.toLowerCase().trim())) {
+                    performanceCampaigns.push(campaignRaw.toLowerCase().trim())
+                  }
                 }
               }
             }
           } catch {}
         }
 
-        // Now sum spend from Meta for all campaigns that generated orders
-        // Match Branch campaign name → Meta ad name (both use same SR_Quick_* naming)
+        // Sum spend from Meta for all campaigns that generated orders
         for (const ad of demand.ads) {
           const adNameNorm = ad.name.toLowerCase().trim()
-          for (const pc of performanceCampaigns) {
-            // Campaign name from Branch matches ad name from Meta
-            if (adNameNorm.includes(pc) || pc.includes(adNameNorm) ||
-                adNameNorm.replace(/[_\s]/g, '').includes(pc.replace(/[_\s]/g, '').substring(0, 18))) {
-              performanceSpend += ad.spend
-              break
-            }
-          }
+          const matched = Array.from(performanceCampaigns).some(pc =>
+            adNameNorm.includes(pc) || pc.includes(adNameNorm) ||
+            adNameNorm.replace(/[_\s]/g, '').includes(pc.replace(/[_\s]/g, '').substring(0, 18))
+          )
+          if (matched) performanceSpend += ad.spend
         }
       }
     } catch (_e) {}
@@ -206,7 +204,7 @@ export async function GET(req: NextRequest) {
         installs: demand.installs,
         orders: branchOrders > 0 ? branchOrders : demand.orders,
         campaigns: demand.campaigns.size,
-        performanceCampaigns: performanceCampaigns.size,
+        performanceCampaigns: performanceCampaigns.length,
         ctr: demand.impressions > 0 ? ((demand.clicks / demand.impressions) * 100).toFixed(2) : '0',
         cpi: demand.installs > 0 ? Math.round(demand.spend / demand.installs) : null,
         cpo,
