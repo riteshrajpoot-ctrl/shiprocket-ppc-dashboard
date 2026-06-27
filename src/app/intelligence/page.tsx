@@ -278,13 +278,6 @@ export default function IntelligencePage() {
   const [pbProgress, setPbProgress] = useState(0)
   const [pbAds, setPbAds] = useState<any[]>([])
 
-  const inferPlacement = (ad: any) => {
-    const cn = (ad.campaign_name + ' ' + ad.adset_name).toLowerCase()
-    if (cn.includes('reel')) return 'Instagram Reels'
-    if (cn.includes('instagram') || cn.includes('ig')) return 'Instagram Feed'
-    if (cn.includes('instream')) return 'FB In-stream'
-    return 'Facebook Feed'
-  }
   const inferAudience = (ad: any) => {
     const cn = (ad.campaign_name + ' ' + ad.adset_name).toLowerCase()
     if (cn.includes('broad') || cn.includes('advantage')) return 'Broad'
@@ -297,7 +290,13 @@ export default function IntelligencePage() {
     try {
       const res = await fetch(`/api/ad-level-report?date_start=${dateStart}&date_end=${dateEnd}`)
       const data = await res.json()
-      const enriched = (data.ads || []).map((ad: any) => ({ ...ad, _placement: inferPlacement(ad), _audience: inferAudience(ad), _dims: null }))
+      // Use real placement from API, fall back to name-based inference only if missing
+      const enriched = (data.ads || []).map((ad: any) => ({
+        ...ad,
+        _placement: ad.placement || 'Facebook Feed',
+        _audience: inferAudience(ad),
+        _dims: null,
+      }))
       setPbAds(enriched)
       const map: Record<string, any[]> = {}
       enriched.forEach((ad: any) => {
