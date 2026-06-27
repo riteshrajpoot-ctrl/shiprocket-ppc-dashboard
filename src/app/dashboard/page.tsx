@@ -1,26 +1,27 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, ChevronDown, Bell, X, Send, Bot, ChevronRight, Zap, ArrowUp, ArrowDown, Pause } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, ChevronDown, Bell, X, Send, Bot, ChevronRight, Zap, ArrowUp, ArrowDown, Pause, Target, Activity, Users, ShoppingBag, AlertTriangle, CheckCircle, Clock, BarChart2, ExternalLink } from 'lucide-react'
 
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface Campaign {
   campaign_name: string; campaign_id: string; objective: string
   spend: number; installs: number; clicks: number; leads: number
-  impressions: number; cpi: number; ctr: number; cpl: number; frequency: number; reach: number; branch_installs: number; first_orders: number; cpo: number; install_to_order_rate: number
+  impressions: number; cpi: number; ctr: number; cpl: number; frequency: number; reach: number
+  branch_installs: number; first_orders: number; cpo: number; install_to_order_rate: number
 }
 interface DailyRow { date: string; spend: number; installs: number; clicks: number; impressions: number; ctr: number; cpi: number }
 interface Alert { severity: 'critical' | 'warning'; msg: string; time: string; category: string }
 interface HealthItem { label: string; score: number; max: number }
 interface BudgetSuggestion { campaign_id: string; campaign_name: string; current_spend: number; cpi: number; cpo: number; installs: number; first_orders: number; action: 'scale' | 'maintain' | 'reduce' | 'pause'; suggested_change_pct: number; reason: string }
-interface MetricsData {
-  campaigns: Campaign[]; daily: DailyRow[]; totals: any
-  alerts: Alert[]; health: number; healthBreakdown: HealthItem[]; budgetSuggestions: BudgetSuggestion[]
-}
+interface MetricsData { campaigns: Campaign[]; daily: DailyRow[]; totals: any; alerts: Alert[]; health: number; healthBreakdown: HealthItem[]; budgetSuggestions: BudgetSuggestion[] }
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const pad = (n: number) => String(n).padStart(2, '0')
 const fmtDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const labelFmt = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const fmtL = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(2)}L` : n >= 1000 ? `₹${Math.round(n / 1000)}K` : `₹${Math.round(n)}`
 
 function getDateRange(tag: string, cs?: string, ce?: string) {
   const today = new Date()
@@ -33,26 +34,97 @@ function getDateRange(tag: string, cs?: string, ce?: string) {
   return { start: fmtDate(s), end: fmtDate(today), label: `${labelFmt(s)} – ${labelFmt(today)}` }
 }
 
-function CpiColor({ val }: { val: number }) {
+function Skeleton() { return <div className="animate-pulse bg-slate-100 rounded-md h-4 w-full" /> }
+
+function CpiPill({ val, target = 20 }: { val: number; target?: number }) {
   if (!val) return <span className="text-xs text-slate-400">—</span>
-  if (val <= 15) return <span className="text-xs font-medium text-emerald-600">₹{Math.round(val)}</span>
-  if (val <= 30) return <span className="text-xs font-medium text-amber-600">₹{Math.round(val)}</span>
-  return <span className="text-xs font-medium text-red-500">₹{Math.round(val)}</span>
+  if (val <= target * 0.75) return <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">₹{Math.round(val)}</span>
+  if (val <= target) return <span className="text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">₹{Math.round(val)}</span>
+  return <span className="text-xs font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">₹{Math.round(val)}</span>
 }
 
 function ObjBadge({ obj }: { obj: string }) {
   const map: Record<string, [string, string]> = {
-    APP_INSTALLS: ['bg-blue-50 text-blue-800', 'Installs'], OUTCOME_APP_PROMOTION: ['bg-blue-50 text-blue-800', 'Installs'],
-    OUTCOME_LEADS: ['bg-purple-50 text-purple-800', 'Leads'], LEAD_GENERATION: ['bg-purple-50 text-purple-800', 'Leads'],
-    OUTCOME_AWARENESS: ['bg-amber-50 text-amber-800', 'Awareness'], BRAND_AWARENESS: ['bg-amber-50 text-amber-800', 'Awareness'],
+    APP_INSTALLS: ['bg-blue-50 text-blue-700', 'Installs'], OUTCOME_APP_PROMOTION: ['bg-blue-50 text-blue-700', 'Installs'],
+    OUTCOME_LEADS: ['bg-purple-50 text-purple-700', 'Leads'], LEAD_GENERATION: ['bg-purple-50 text-purple-700', 'Leads'],
+    OUTCOME_AWARENESS: ['bg-amber-50 text-amber-700', 'Awareness'], BRAND_AWARENESS: ['bg-amber-50 text-amber-700', 'Awareness'],
   }
-  const [style, label] = map[obj] || ['bg-slate-100 text-slate-600', obj]
+  const [style, label] = map[obj] || ['bg-slate-100 text-slate-500', obj.slice(0, 8)]
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${style}`}>{label}</span>
 }
 
-function Skeleton() { return <div className="animate-pulse bg-slate-100 rounded-md h-4 w-full" /> }
+// ── Channel Card ──────────────────────────────────────────────────────────────
+function ChannelCard({ icon, name, status, color, spend, installs, firstOrders, cpi, cpo, ctr, budget, budgetUsed, onClick }: any) {
+  const paced = budgetUsed ? Math.round(budgetUsed) : null
+  const statusConfig: Record<string, { dot: string; label: string }> = {
+    live: { dot: 'bg-emerald-500', label: 'Live' },
+    beta: { dot: 'bg-amber-400', label: 'Beta' },
+    soon: { dot: 'bg-slate-300', label: 'Soon' },
+    connecting: { dot: 'bg-blue-400 animate-pulse', label: 'Connecting' },
+  }
+  const s = statusConfig[status] || statusConfig.soon
+  const isActive = status === 'live' || status === 'beta'
 
-// ─── Drilldown Modal ──────────────────────────────────────────────────────────
+  return (
+    <div onClick={isActive ? onClick : undefined}
+      className={`bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-3 ${isActive ? 'cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all' : 'opacity-60'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold ${color}`}>{icon}</div>
+          <div>
+            <div className="text-sm font-semibold text-slate-800">{name}</div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+              <span className="text-xs text-slate-400">{s.label}</span>
+            </div>
+          </div>
+        </div>
+        {isActive && <ExternalLink size={12} className="text-slate-300" />}
+      </div>
+
+      {isActive ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-xs text-slate-400 mb-0.5">Spend MTD</div>
+              <div className="text-sm font-semibold text-slate-800">{spend ? fmtL(spend) : '—'}</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-xs text-slate-400 mb-0.5">Installs</div>
+              <div className="text-sm font-semibold text-emerald-600">{installs ? Number(installs).toLocaleString('en-IN') : '—'}</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-xs text-slate-400 mb-0.5">First orders</div>
+              <div className="text-sm font-semibold text-slate-800">{firstOrders ? Number(firstOrders).toLocaleString('en-IN') : '—'}</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-xs text-slate-400 mb-0.5">CPI / CPO</div>
+              <div className="text-sm font-semibold text-slate-800">
+                {cpi ? `₹${Math.round(cpi)}` : '—'} {cpo ? <span className="text-xs text-slate-500">/ ₹{Math.round(cpo)}</span> : ''}
+              </div>
+            </div>
+          </div>
+          {paced !== null && (
+            <div>
+              <div className="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Budget pacing</span>
+                <span className={paced > 80 ? 'text-emerald-600' : paced < 50 ? 'text-amber-600' : 'text-slate-500'}>{paced}% used</span>
+              </div>
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(paced, 100)}%`, background: paced > 90 ? '#E24B4A' : paced > 70 ? '#EF9F27' : '#1D9E75' }} />
+              </div>
+            </div>
+          )}
+          {ctr && <div className="text-xs text-slate-400">CTR <span className={`font-medium ${Number(ctr) >= 1 ? 'text-emerald-600' : Number(ctr) >= 0.5 ? 'text-amber-600' : 'text-red-500'}`}>{Number(ctr).toFixed(2)}%</span></div>}
+        </>
+      ) : (
+        <div className="text-xs text-slate-400 text-center py-4">Integration coming soon</div>
+      )}
+    </div>
+  )
+}
+
+// ── Drilldown Modal ───────────────────────────────────────────────────────────
 function DrilldownModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
@@ -64,16 +136,13 @@ function DrilldownModal({ campaign, onClose }: { campaign: Campaign; onClose: ()
         </div>
         <div className="grid grid-cols-3 gap-3 mb-4">
           {[
-            { label: 'Total spend', value: `₹${(Number(campaign.spend) / 1000).toFixed(1)}K` },
+            { label: 'Total spend', value: fmtL(Number(campaign.spend)) },
             { label: 'Installs', value: Number(campaign.installs) > 0 ? Number(campaign.installs).toLocaleString('en-IN') : '—' },
             { label: 'CPI', value: Number(campaign.cpi) > 0 ? `₹${Math.round(Number(campaign.cpi))}` : '—' },
             { label: 'Clicks', value: Number(campaign.clicks).toLocaleString('en-IN') },
-            { label: 'Impressions', value: (Number(campaign.impressions) / 1000).toFixed(1) + 'K' },
             { label: 'CTR', value: Number(campaign.ctr).toFixed(2) + '%' },
             { label: 'Frequency', value: Number(campaign.frequency).toFixed(2) },
             { label: 'Reach', value: (Number(campaign.reach) / 1000).toFixed(1) + 'K' },
-            { label: 'Leads', value: Number(campaign.leads) > 0 ? `${campaign.leads} (₹${Math.round(Number(campaign.cpl))} CPL)` : '—' },
-            { label: 'Branch installs', value: Number(campaign.branch_installs) > 0 ? Number(campaign.branch_installs).toLocaleString('en-IN') : '—' },
             { label: 'First orders', value: Number(campaign.first_orders) > 0 ? Number(campaign.first_orders).toString() : '—' },
             { label: 'CPO', value: Number(campaign.cpo) > 0 ? `₹${Math.round(Number(campaign.cpo))}` : '—' },
           ].map(m => (
@@ -83,180 +152,96 @@ function DrilldownModal({ campaign, onClose }: { campaign: Campaign; onClose: ()
             </div>
           ))}
         </div>
-        <div className="border-t border-slate-100 pt-3">
+        <div className="border-t border-slate-100 pt-3 space-y-1.5">
           <div className="text-xs text-slate-400 mb-2">Performance signals</div>
-          <div className="space-y-1.5">
-            {Number(campaign.ctr) < 0.5 && <div className="text-xs text-red-600">⚠ Low CTR — consider refreshing creatives</div>}
-            {Number(campaign.cpi) > 50 && <div className="text-xs text-red-600">⚠ High CPI ₹{Math.round(Number(campaign.cpi))} — review audience targeting</div>}
-            {Number(campaign.frequency) > 2.5 && <div className="text-xs text-amber-600">⚠ High frequency {Number(campaign.frequency).toFixed(1)} — creative fatigue likely</div>}
-            {Number(campaign.cpi) > 0 && Number(campaign.cpi) <= 15 && <div className="text-xs text-emerald-600">✓ Excellent CPI — consider scaling budget</div>}
-            {Number(campaign.ctr) >= 1.2 && <div className="text-xs text-emerald-600">✓ Strong CTR — creative is resonating</div>}
-            {Number(campaign.installs) === 0 && !['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(campaign.objective) && <div className="text-xs text-amber-600">⚠ No installs tracked — check pixel setup</div>}
-          </div>
+          {Number(campaign.ctr) < 0.5 && <div className="text-xs text-red-600 flex items-center gap-1.5"><AlertTriangle size={11} />Low CTR — consider refreshing creatives</div>}
+          {Number(campaign.cpi) > 50 && <div className="text-xs text-red-600 flex items-center gap-1.5"><AlertTriangle size={11} />High CPI ₹{Math.round(Number(campaign.cpi))} — review audience</div>}
+          {Number(campaign.frequency) > 2.5 && <div className="text-xs text-amber-600 flex items-center gap-1.5"><AlertTriangle size={11} />High frequency {Number(campaign.frequency).toFixed(1)} — creative fatigue likely</div>}
+          {Number(campaign.cpi) > 0 && Number(campaign.cpi) <= 15 && <div className="text-xs text-emerald-600 flex items-center gap-1.5"><CheckCircle size={11} />Excellent CPI — consider scaling budget</div>}
+          {Number(campaign.ctr) >= 1.2 && <div className="text-xs text-emerald-600 flex items-center gap-1.5"><CheckCircle size={11} />Strong CTR — creative is resonating</div>}
         </div>
       </div>
     </div>
   )
 }
 
-// ─── Budget Optimizer ─────────────────────────────────────────────────────────
+// ── Budget Optimizer ──────────────────────────────────────────────────────────
 function BudgetOptimizer({ suggestions, onClose }: { suggestions: BudgetSuggestion[]; onClose: () => void }) {
-  const [applying, setApplying] = useState<string | null>(null)
   const [applied, setApplied] = useState<string[]>([])
-
-  const actionConfig = {
-    scale: { icon: <ArrowUp size={12} />, color: 'text-emerald-700 bg-emerald-50', label: 'Scale +20%' },
-    maintain: { icon: <Minus size={12} />, color: 'text-slate-600 bg-slate-100', label: 'Maintain' },
-    reduce: { icon: <ArrowDown size={12} />, color: 'text-amber-700 bg-amber-50', label: 'Reduce 30%' },
-    pause: { icon: <Pause size={12} />, color: 'text-red-700 bg-red-50', label: 'Pause' },
-  }
-
-  const handleApply = async (s: BudgetSuggestion) => {
-    if (s.action === 'maintain') return
-    setApplying(s.campaign_id)
-    await new Promise(r => setTimeout(r, 1500))
-    setApplied(prev => [...prev, s.campaign_id])
-    setApplying(null)
-  }
-
+  const [applying, setApplying] = useState<string | null>(null)
+  const cfg = { scale: { icon: <ArrowUp size={12} />, color: 'text-emerald-700 bg-emerald-50', label: 'Scale +20%' }, maintain: { icon: <Minus size={12} />, color: 'text-slate-600 bg-slate-100', label: 'Maintain' }, reduce: { icon: <ArrowDown size={12} />, color: 'text-amber-700 bg-amber-50', label: 'Reduce 30%' }, pause: { icon: <Pause size={12} />, color: 'text-red-700 bg-red-50', label: 'Pause' } }
+  const handleApply = async (s: BudgetSuggestion) => { if (s.action === 'maintain') return; setApplying(s.campaign_id); await new Promise(r => setTimeout(r, 1500)); setApplied(prev => [...prev, s.campaign_id]); setApplying(null) }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
       <div className="relative bg-white rounded-2xl border border-slate-200 w-full max-w-2xl mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <div>
-            <div className="text-sm font-semibold text-slate-800 flex items-center gap-2"><Zap size={14} className="text-amber-500" />Budget optimizer</div>
-            <div className="text-xs text-slate-400 mt-0.5">AI-recommended budget changes based on CPI performance</div>
-          </div>
+          <div><div className="text-sm font-semibold text-slate-800 flex items-center gap-2"><Zap size={14} className="text-amber-500" />Budget optimizer</div><div className="text-xs text-slate-400 mt-0.5">AI-recommended budget changes based on performance</div></div>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 border-none bg-transparent cursor-pointer text-slate-400"><X size={16} /></button>
         </div>
         <div className="p-4 space-y-2 max-h-96 overflow-y-auto">
-          {suggestions.map(s => {
-            const cfg = actionConfig[s.action]
-            const isApplied = applied.includes(s.campaign_id)
-            const isApplying = applying === s.campaign_id
-            return (
-              <div key={s.campaign_id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-slate-800 truncate">{s.campaign_name}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{s.reason}</div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="text-xs text-slate-500">₹{(s.current_spend / 1000).toFixed(1)}K · {s.installs} installs · {s.first_orders > 0 ? s.first_orders + " orders" : "no orders yet"}</div>
-                  <div className="text-xs font-medium text-slate-700">CPI ₹{Math.round(s.cpi)}</div>
-                </div>
-                <div className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${cfg.color}`}>
-                  {cfg.icon}{cfg.label}
-                </div>
-                {s.action !== 'maintain' && (
-                  <button
-                    onClick={() => handleApply(s)}
-                    disabled={isApplied || isApplying}
-                    className={`text-xs px-3 py-1.5 rounded-lg border-none cursor-pointer ${isApplied ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-900 text-white hover:bg-blue-800'} disabled:opacity-60`}>
-                    {isApplied ? '✓ Applied' : isApplying ? 'Applying...' : 'Apply'}
-                  </button>
-                )}
-              </div>
-            )
-          })}
+          {suggestions.map(s => { const c = cfg[s.action]; const isApplied = applied.includes(s.campaign_id); const isApplying = applying === s.campaign_id; return (
+            <div key={s.campaign_id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50">
+              <div className="flex-1 min-w-0"><div className="text-xs font-medium text-slate-800 truncate">{s.campaign_name}</div><div className="text-xs text-slate-400 mt-0.5">{s.reason}</div></div>
+              <div className="text-right flex-shrink-0"><div className="text-xs text-slate-500">{fmtL(s.current_spend)} · {s.installs} installs</div><div className="text-xs font-medium text-slate-700">CPI ₹{Math.round(s.cpi)}</div></div>
+              <div className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${c.color}`}>{c.icon}{c.label}</div>
+              {s.action !== 'maintain' && <button onClick={() => handleApply(s)} disabled={isApplied || isApplying} className={`text-xs px-3 py-1.5 rounded-lg border-none cursor-pointer ${isApplied ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-900 text-white'} disabled:opacity-60`}>{isApplied ? '✓ Applied' : isApplying ? 'Applying...' : 'Apply'}</button>}
+            </div>
+          )})}
         </div>
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
-          <div className="text-xs text-slate-400">💡 Budget changes are applied via Meta Ads API. Changes take effect within 15 minutes.</div>
-        </div>
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl"><div className="text-xs text-slate-400">Budget changes applied via Meta Ads API. Takes effect within 15 minutes.</div></div>
       </div>
     </div>
   )
 }
 
-// ─── AI Sidekick ──────────────────────────────────────────────────────────────
+// ── AI Sidekick ───────────────────────────────────────────────────────────────
 function AISidekick({ data, range, onClose }: { data: MetricsData | null; range: string; onClose: () => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: `Hi! I have live data for ${range}. Ask me anything — "Why is CPI high?", "Which campaign should I scale?", "How's budget pacing?"` }
-  ])
-  const [input, setInput] = useState('')
-  const [thinking, setThinking] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: `Hi! I have live data for ${range}. Ask me anything — "Why is CPI high?", "Which campaign to scale?", "How's budget pacing?"` }])
+  const [input, setInput] = useState(''); const [thinking, setThinking] = useState(false); const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-
   const send = async (msg?: string) => {
-    const userMsg = msg || input.trim()
-    if (!userMsg || thinking) return
-    setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }])
-    setThinking(true)
+    const userMsg = msg || input.trim(); if (!userMsg || thinking) return; setInput('')
+    setMessages(prev => [...prev, { role: 'user', content: userMsg }]); setThinking(true)
     try {
-      const context = data ? `Period: ${range}
-Spend: ₹${(data.totals.spend / 100000).toFixed(2)}L | Installs: ${data.totals.installs} | CPI: ₹${data.totals.cpi} | CTR: ${data.totals.ctr}%
-Health score: ${data.health}/100
-Campaigns: ${data.campaigns.map(c => `${c.campaign_name}(spend:₹${Math.round(c.spend)},installs:${c.installs},CPI:₹${Math.round(c.cpi)},CTR:${c.ctr}%,freq:${c.frequency})`).join('; ')}
-Alerts: ${data.alerts.map(a => a.msg).join('; ')}` : 'No data.'
-
-      const res = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, context, history: messages.slice(-6) })
-      })
-      const json = await res.json()
-      setMessages(prev => [...prev, { role: 'assistant', content: json.reply || 'Could not get response.' }])
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }])
-    } finally { setThinking(false) }
+      const context = data ? `Period: ${range}\nSpend: ${fmtL(data.totals.spend)} | Installs: ${data.totals.installs} | CPI: ₹${data.totals.cpi} | CTR: ${data.totals.ctr}%\nHealth: ${data.health}/100\nCampaigns: ${data.campaigns.map(c => `${c.campaign_name}(₹${Math.round(c.spend)},${c.installs} installs,CPI:₹${Math.round(c.cpi)},CTR:${c.ctr}%)`).join('; ')}\nAlerts: ${data.alerts.map(a => a.msg).join('; ')}` : 'No data.'
+      const res = await fetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: userMsg, context, history: messages.slice(-6) }) })
+      const json = await res.json(); setMessages(prev => [...prev, { role: 'assistant', content: json.reply || 'Could not get response.' }])
+    } catch { setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]) }
+    finally { setThinking(false) }
   }
-
   return (
     <div className="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl flex flex-col" style={{ height: '420px' }}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-blue-900 flex items-center justify-center"><Bot size={12} className="text-blue-100" /></div>
-          <span className="text-sm font-semibold text-slate-800">PPC Sidekick</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-        </div>
+        <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-blue-900 flex items-center justify-center"><Bot size={12} className="text-blue-100" /></div><span className="text-sm font-semibold text-slate-800">PPC Sidekick</span><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /></div>
         <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 border-none bg-transparent cursor-pointer text-slate-400"><X size={14} /></button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`text-xs rounded-xl px-3 py-2 max-w-[85%] leading-relaxed ${m.role === 'user' ? 'bg-blue-900 text-blue-50' : 'bg-slate-100 text-slate-700'}`}>{m.content}</div>
-          </div>
-        ))}
+        {messages.map((m, i) => <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`text-xs rounded-xl px-3 py-2 max-w-[85%] leading-relaxed ${m.role === 'user' ? 'bg-blue-900 text-blue-50' : 'bg-slate-100 text-slate-700'}`}>{m.content}</div></div>)}
         {thinking && <div className="flex justify-start"><div className="text-xs rounded-xl px-3 py-2 bg-slate-100 text-slate-400 animate-pulse">Thinking...</div></div>}
         <div ref={bottomRef} />
       </div>
       <div className="px-3 pb-3">
-        <div className="flex gap-2">
-          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()}
-            placeholder="Ask about your campaigns..."
-            className="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 outline-none focus:border-blue-300 focus:bg-white" />
-          <button onClick={() => send()} disabled={thinking || !input.trim()} className="p-2 rounded-xl bg-blue-900 text-blue-50 border-none cursor-pointer disabled:opacity-40"><Send size={12} /></button>
-        </div>
-        <div className="flex gap-1.5 mt-2 flex-wrap">
-          {['Why is CPI high?', 'Best campaign?', 'Scale budget?'].map(q => (
-            <button key={q} onClick={() => send(q)} className="text-xs px-2 py-1 rounded-lg bg-slate-100 text-slate-500 border-none cursor-pointer hover:bg-slate-200">{q}</button>
-          ))}
-        </div>
+        <div className="flex gap-2"><input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Ask about your campaigns..." className="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 outline-none focus:border-blue-300" /><button onClick={() => send()} disabled={thinking || !input.trim()} className="p-2 rounded-xl bg-blue-900 text-blue-50 border-none cursor-pointer disabled:opacity-40"><Send size={12} /></button></div>
+        <div className="flex gap-1.5 mt-2 flex-wrap">{['Why is CPI high?', 'Best campaign?', 'Scale budget?'].map(q => <button key={q} onClick={() => send(q)} className="text-xs px-2 py-1 rounded-lg bg-slate-100 text-slate-500 border-none cursor-pointer hover:bg-slate-200">{q}</button>)}</div>
       </div>
     </div>
   )
 }
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [activeMetric, setActiveMetric] = useState<'spend' | 'installs' | 'clicks' | 'ctr' | 'cpi'>('spend')
   const [activeRangeTag, setActiveRangeTag] = useState('MTD')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd] = useState('')
-  const [showDateMenu, setShowDateMenu] = useState(false)
-  const [showCustomPicker, setShowCustomPicker] = useState(false)
+  const [customStart, setCustomStart] = useState(''); const [customEnd, setCustomEnd] = useState('')
+  const [showDateMenu, setShowDateMenu] = useState(false); const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [activeAccount, setActiveAccount] = useState('Quick')
   const [lastUpdated, setLastUpdated] = useState('Just now')
   const [chartLoaded, setChartLoaded] = useState(false)
   const [data, setData] = useState<MetricsData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null)
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
-  const [showSidekick, setShowSidekick] = useState(false)
-  const [showOptimizer, setShowOptimizer] = useState(false)
+  const [showSidekick, setShowSidekick] = useState(false); const [showOptimizer, setShowOptimizer] = useState(false)
 
   const range = getDateRange(activeRangeTag, customStart, customEnd)
 
@@ -266,10 +251,8 @@ export default function Dashboard() {
       const r = getDateRange(tag, cs, ce)
       const res = await fetch(`/api/live-metrics?date_start=${r.start}&date_end=${r.end}`)
       if (!res.ok) throw new Error(`API error ${res.status}`)
-      const json = await res.json()
-      if (json.error) throw new Error(json.error)
-      setData(json)
-      setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }))
+      const json = await res.json(); if (json.error) throw new Error(json.error)
+      setData(json); setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }))
     } catch (e: any) { setError('Failed to load: ' + e.message) }
     finally { setLoading(false) }
   }, [])
@@ -278,10 +261,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const s = document.createElement('script')
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js'
-    s.onload = () => setChartLoaded(true)
-    document.head.appendChild(s)
+    const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js'; s.onload = () => setChartLoaded(true); document.head.appendChild(s)
   }, [])
 
   useEffect(() => {
@@ -292,21 +272,11 @@ export default function Dashboard() {
     const colors = { spend: '#378ADD', installs: '#1D9E75', clicks: '#534AB7', ctr: '#EF9F27', cpi: '#E24B4A' }
     const labels = data.daily.map(d => new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))
     const values = data.daily.map(d => activeMetric === 'ctr' ? Number(Number(d[activeMetric]).toFixed(2)) : Math.round(Number(d[activeMetric])))
-    const fmtV = (v: number) => activeMetric === 'spend' ? '₹' + v.toLocaleString('en-IN') : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + v : v.toLocaleString('en-IN')
+    const fmtV = (v: number) => activeMetric === 'spend' ? fmtL(v) : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + v : v.toLocaleString('en-IN')
     new W.Chart(canvas, { type: 'line', data: { labels, datasets: [{ data: values, borderColor: colors[activeMetric], backgroundColor: colors[activeMetric] + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: colors[activeMetric] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx: any) => ' ' + fmtV(ctx.raw) } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { font: { size: 10 }, callback: (v: any) => fmtV(v) } } }, animation: { duration: 300 } } })
   }, [chartLoaded, data, activeMetric])
 
-  useEffect(() => {
-    if (!chartLoaded || !data?.campaigns?.length) return
-    const W = window as any; if (!W.Chart) return
-    const canvas = document.getElementById('objCanvas') as HTMLCanvasElement; if (!canvas) return
-    const ex = W.Chart.getChart(canvas); if (ex) ex.destroy()
-    const iS = data.campaigns.filter(c => ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-    const lS = data.campaigns.filter(c => ['OUTCOME_LEADS', 'LEAD_GENERATION'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-    const aS = data.campaigns.filter(c => ['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-    new W.Chart(canvas, { type: 'doughnut', data: { labels: ['Installs', 'Leads', 'Awareness'], datasets: [{ data: [iS, lS, aS], backgroundColor: ['#378ADD', '#534AB7', '#EF9F27'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c: any) => ' ₹' + Math.round(c.raw).toLocaleString('en-IN') } } }, cutout: '70%' } })
-  }, [chartLoaded, data])
-
+  // Derived values
   const campaigns = data?.campaigns ?? []
   const daily = data?.daily ?? []
   const alerts = data?.alerts ?? []
@@ -318,28 +288,35 @@ export default function Dashboard() {
   const totalSpend = campaigns.reduce((a, c) => a + Number(c.spend), 0)
   const totalInstalls = campaigns.reduce((a, c) => a + Number(c.installs), 0)
   const totalClicks = campaigns.reduce((a, c) => a + Number(c.clicks), 0)
-  const totalLeads = campaigns.reduce((a, c) => a + Number(c.leads), 0)
   const totalImpressions = campaigns.reduce((a, c) => a + Number(c.impressions), 0)
+  const totalFirstOrders = campaigns.reduce((a, c) => a + Number(c.first_orders), 0)
   const avgCPI = totalInstalls > 0 ? Math.round(totalSpend / totalInstalls) : 0
   const avgCTR = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : '0'
-  const leadSpend = campaigns.filter(c => ['OUTCOME_LEADS', 'LEAD_GENERATION'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-  const installSpend = campaigns.filter(c => ['APP_INSTALLS', 'OUTCOME_APP_PROMOTION'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-  const awarenessSpend = campaigns.filter(c => ['OUTCOME_AWARENESS', 'BRAND_AWARENESS', 'REACH'].includes(c.objective)).reduce((a, c) => a + Number(c.spend), 0)
-  const installPct = totalSpend > 0 ? Math.round(installSpend / totalSpend * 100) : 0
-  const leadPct = totalSpend > 0 ? Math.round(leadSpend / totalSpend * 100) : 0
-  const awarenessPct = totalSpend > 0 ? Math.round(awarenessSpend / totalSpend * 100) : 0
+
+  // Supply vs Demand split
+  const supplyCampaigns = campaigns.filter(c => c.campaign_name.toLowerCase().includes('partner') || c.campaign_name.toLowerCase().includes('rider') || c.campaign_name.toLowerCase().includes('driver') || c.campaign_name.toLowerCase().includes('3w') || c.campaign_name.toLowerCase().includes('supply'))
+  const demandCampaigns = campaigns.filter(c => !supplyCampaigns.includes(c))
+  const supplySpend = supplyCampaigns.reduce((a, c) => a + Number(c.spend), 0)
+  const demandSpend = demandCampaigns.reduce((a, c) => a + Number(c.spend), 0)
+  const supplyInstalls = supplyCampaigns.reduce((a, c) => a + Number(c.installs), 0)
+  const demandInstalls = demandCampaigns.reduce((a, c) => a + Number(c.installs), 0)
+  const demandOrders = demandCampaigns.reduce((a, c) => a + Number(c.first_orders), 0)
+  const supplyCPI = supplyInstalls > 0 ? Math.round(supplySpend / supplyInstalls) : 0
+  const demandCPI = demandInstalls > 0 ? Math.round(demandSpend / demandInstalls) : 0
+  const demandCPO = demandOrders > 0 ? Math.round(demandSpend / demandOrders) : 0
+  const supplyCTR = ((supplyCampaigns.reduce((a, c) => a + Number(c.clicks), 0) / Math.max(supplyCampaigns.reduce((a, c) => a + Number(c.impressions), 0), 1)) * 100).toFixed(2)
+  const budgetPacing = totalSpend > 0 ? Math.round((totalSpend / 350000) * 100) : 0
 
   const metricValues = daily.map(d => Number(d[activeMetric]))
   const avgMetric = metricValues.length ? metricValues.reduce((a, b) => a + b, 0) / metricValues.length : 0
   const peakIdx = metricValues.length ? metricValues.indexOf(Math.max(...metricValues)) : -1
   const lowIdx = metricValues.length ? metricValues.indexOf(Math.min(...metricValues)) : -1
-  const fmtMetric = (v: number) => activeMetric === 'spend' ? '₹' + Math.round(v).toLocaleString('en-IN') : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + Math.round(v) : Math.round(v).toLocaleString('en-IN')
+  const fmtMetric = (v: number) => activeMetric === 'spend' ? fmtL(v) : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + Math.round(v) : Math.round(v).toLocaleString('en-IN')
   const peakLabel = daily[peakIdx] ? `${fmtMetric(metricValues[peakIdx])} (${new Date(daily[peakIdx].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : '—'
   const lowLabel = daily[lowIdx] ? `${fmtMetric(metricValues[lowIdx])} (${new Date(daily[lowIdx].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : '—'
-
   const criticalCount = alerts.filter(a => a.severity === 'critical').length
   const healthStatus = health >= 80 ? 'Good' : health >= 60 ? 'Needs attention' : 'Critical'
-  const healthBadgeColor = health >= 80 ? 'bg-emerald-50 text-emerald-700' : health >= 60 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
+  const healthColor = health >= 80 ? '#1D9E75' : health >= 60 ? '#EF9F27' : '#E24B4A'
   const scoreColor = (s: number, max: number) => { const p = s / max; return p >= 0.8 ? '#1D9E75' : p >= 0.6 ? '#EF9F27' : '#E24B4A' }
 
   return (
@@ -350,86 +327,160 @@ export default function Dashboard() {
 
       {/* Topbar */}
       <div className="bg-white border-b border-slate-200 px-4 h-11 flex items-center gap-2 sticky top-0 z-20">
-        <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center flex-shrink-0">
-          <span className="text-blue-100 text-xs font-semibold">SR</span>
-        </div>
+        <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center flex-shrink-0"><span className="text-blue-100 text-xs font-semibold">SR</span></div>
         <span className="text-sm font-semibold text-slate-800 flex-shrink-0">PPC command center</span>
         <div className="flex gap-1.5 ml-2">
           {['Quick', 'Main', 'All'].map(a => (
-            <button key={a} onClick={() => setActiveAccount(a)}
-              className={`text-xs px-3 py-1 rounded-full border-none cursor-pointer ${activeAccount === a ? 'bg-blue-50 text-blue-800' : 'bg-slate-100 text-slate-500'}`}>
+            <button key={a} onClick={() => setActiveAccount(a)} className={`text-xs px-3 py-1 rounded-full border-none cursor-pointer ${activeAccount === a ? 'bg-blue-50 text-blue-800 font-medium' : 'bg-slate-100 text-slate-500'}`}>
               {a === 'All' ? 'All accounts' : `Shiprocket ${a}`}
             </button>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <div className="relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setShowDateMenu(!showDateMenu)}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-700 cursor-pointer hover:bg-slate-50">
+            <button onClick={() => setShowDateMenu(!showDateMenu)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-700 cursor-pointer hover:bg-slate-50">
               <Calendar size={12} /><span>{range.label}</span><ChevronDown size={10} />
             </button>
             {showDateMenu && (
               <div className="absolute right-0 top-8 bg-white border border-slate-200 rounded-xl shadow-lg p-1 z-30 w-60">
                 <div className="text-xs text-slate-400 px-2 py-1.5 font-medium">Select date range</div>
                 {['MTD', 'Last 7d', 'May', 'Apr'].map(tag => (
-                  <button key={tag} onClick={() => { setActiveRangeTag(tag); setShowCustomPicker(false); setShowDateMenu(false) }}
-                    className={`block w-full text-left text-xs px-2 py-1.5 rounded-lg border-none cursor-pointer hover:bg-slate-50 ${activeRangeTag === tag ? 'bg-blue-50 text-blue-800' : 'text-slate-700 bg-transparent'}`}>
-                    {getDateRange(tag).label}
-                  </button>
+                  <button key={tag} onClick={() => { setActiveRangeTag(tag); setShowDateMenu(false) }} className={`block w-full text-left text-xs px-2 py-1.5 rounded-lg border-none cursor-pointer hover:bg-slate-50 ${activeRangeTag === tag ? 'bg-blue-50 text-blue-800' : 'text-slate-700 bg-transparent'}`}>{getDateRange(tag).label}</button>
                 ))}
                 <div className="border-t border-slate-100 mt-1 pt-1">
-                  <button onClick={() => setShowCustomPicker(!showCustomPicker)}
-                    className="block w-full text-left text-xs px-2 py-1.5 rounded-lg border-none cursor-pointer hover:bg-slate-50 text-slate-700 bg-transparent">
-                    Custom range {showCustomPicker ? '▲' : '▼'}
-                  </button>
+                  <button onClick={() => setShowCustomPicker(!showCustomPicker)} className="block w-full text-left text-xs px-2 py-1.5 rounded-lg border-none cursor-pointer hover:bg-slate-50 text-slate-700 bg-transparent">Custom range {showCustomPicker ? '▲' : '▼'}</button>
                   {showCustomPicker && (
                     <div className="px-2 pb-2 space-y-2">
                       <div><div className="text-xs text-slate-400 mb-1">From</div><input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 outline-none" /></div>
                       <div><div className="text-xs text-slate-400 mb-1">To</div><input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 outline-none" /></div>
-                      <button onClick={() => { if (customStart && customEnd) { setActiveRangeTag('Custom'); setShowDateMenu(false) } }} disabled={!customStart || !customEnd}
-                        className="w-full text-xs py-1.5 rounded-lg bg-blue-900 text-blue-50 border-none cursor-pointer disabled:opacity-40">Apply range</button>
+                      <button onClick={() => { if (customStart && customEnd) { setActiveRangeTag('Custom'); setShowDateMenu(false) } }} disabled={!customStart || !customEnd} className="w-full text-xs py-1.5 rounded-lg bg-blue-900 text-blue-50 border-none cursor-pointer disabled:opacity-40">Apply range</button>
                     </div>
                   )}
                 </div>
               </div>
             )}
           </div>
-          <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>Live · Meta Quick
-          </span>
-          <button onClick={() => fetchMetrics(activeRangeTag, customStart, customEnd)} className="p-1.5 rounded-md hover:bg-slate-100 border-none bg-transparent cursor-pointer text-slate-500">
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-          </button>
-          <button onClick={() => setShowOptimizer(true)} disabled={budgetSuggestions.length === 0}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 cursor-pointer hover:bg-amber-100 disabled:opacity-40">
-            <Zap size={12} />Budget optimizer
-          </button>
-          <button onClick={() => setShowSidekick(!showSidekick)}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border cursor-pointer ${showSidekick ? 'bg-blue-900 text-blue-50 border-blue-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
-            <Bot size={12} />AI Sidekick
-          </button>
+          <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Live · Meta {activeAccount}</span>
+          <button onClick={() => fetchMetrics(activeRangeTag, customStart, customEnd)} className="p-1.5 rounded-md hover:bg-slate-100 border-none bg-transparent cursor-pointer text-slate-500"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></button>
+          <button onClick={() => setShowOptimizer(true)} disabled={budgetSuggestions.length === 0} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 cursor-pointer hover:bg-amber-100 disabled:opacity-40"><Zap size={12} />Budget optimizer</button>
+          <button onClick={() => setShowSidekick(!showSidekick)} className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border cursor-pointer ${showSidekick ? 'bg-blue-900 text-blue-50 border-blue-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><Bot size={12} />AI Sidekick</button>
           <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center text-xs font-semibold text-blue-800">AK</div>
         </div>
       </div>
 
-      <div className="p-4 space-y-3">
+      <div className="p-4 space-y-4">
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Showing data for <span className="text-slate-700 font-medium">{range.label}</span> · Shiprocket {activeAccount}</span>
-          <span>Last updated: {lastUpdated}</span>
+          <span className="flex items-center gap-1"><Clock size={11} />Last updated: {lastUpdated}</span>
         </div>
         {error && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{error}</div>}
 
-        {/* KPIs */}
+        {/* ── SECTION 1: Channel overview ── */}
+        <div>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Channel overview</div>
+          <div className="grid grid-cols-4 gap-3">
+            <ChannelCard
+              icon="M" name="Meta Ads" status="live" color="bg-blue-600"
+              spend={totalSpend} installs={totalInstalls} firstOrders={totalFirstOrders}
+              cpi={avgCPI} cpo={totals?.cpo > 0 ? totals.cpo : null} ctr={avgCTR}
+              budget={350000} budgetUsed={budgetPacing}
+              onClick={() => window.location.href = '/meta-ads'}
+            />
+            <ChannelCard icon="G" name="Google Ads" status="soon" color="bg-red-500" />
+            <ChannelCard icon="B" name="Branch" status="beta" color="bg-purple-600"
+              spend={null} installs={totalInstalls} firstOrders={totalFirstOrders}
+              cpi={null} cpo={totals?.cpo > 0 ? totals.cpo : null} ctr={null}
+              onClick={() => window.location.href = '/branch'}
+            />
+            <ChannelCard icon="A" name="Affiliate" status="soon" color="bg-orange-500" />
+          </div>
+        </div>
+
+        {/* ── SECTION 2: Supply vs Demand split ── */}
+        <div>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Supply vs Demand — Meta Ads</div>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Supply */}
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-800">🚗 Supply side</div>
+                  <div className="text-xs text-slate-400 mt-0.5">Driver / partner acquisition</div>
+                </div>
+                <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium">{fmtL(supplySpend)} · {Math.round(supplySpend / Math.max(totalSpend, 1) * 100)}% of total</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { label: 'Driver installs', value: loading ? null : supplyInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
+                  { label: 'Cost per install', value: loading ? null : supplyCPI > 0 ? `₹${supplyCPI}` : '—', color: supplyCPI <= 20 ? 'text-emerald-600' : 'text-amber-600' },
+                  { label: 'Avg CTR', value: loading ? null : `${supplyCTR}%`, color: Number(supplyCTR) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
+                ].map(m => (
+                  <div key={m.label} className="bg-slate-50 rounded-lg p-2.5">
+                    <div className="text-xs text-slate-400 mb-1">{m.label}</div>
+                    {m.value === null ? <Skeleton /> : <div className={`text-sm font-semibold ${m.color}`}>{m.value}</div>}
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-slate-400 mb-1 flex justify-between"><span>Budget pacing</span><span className={budgetPacing > 80 ? 'text-emerald-600' : 'text-amber-600'}>{Math.round(supplySpend / 179000 * 100)}% used</span></div>
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(Math.round(supplySpend / 179000 * 100), 100)}%` }} /></div>
+              <div className="mt-3">
+                <div className="text-xs text-slate-500 font-medium mb-2">Top campaigns by installs</div>
+                {loading ? <Skeleton /> : supplyCampaigns.slice(0, 3).map(c => (
+                  <div key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="flex items-center justify-between py-1.5 border-b border-slate-50 cursor-pointer hover:bg-slate-50 px-1 rounded">
+                    <span className="text-xs text-slate-700 truncate flex-1 mr-2">{c.campaign_name}</span>
+                    <span className="text-xs text-emerald-600 font-medium flex-shrink-0">{Number(c.installs).toLocaleString('en-IN')} · ₹{Math.round(c.cpi)} CPI</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Demand */}
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-800">📦 Demand side</div>
+                  <div className="text-xs text-slate-400 mt-0.5">Customer acquisition</div>
+                </div>
+                <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">{fmtL(demandSpend)} · {Math.round(demandSpend / Math.max(totalSpend, 1) * 100)}% of total</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { label: 'App installs', value: loading ? null : demandInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
+                  { label: 'First orders', value: loading ? null : demandOrders > 0 ? demandOrders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
+                  { label: 'Cost per order', value: loading ? null : demandCPO > 0 ? `₹${demandCPO}` : '—', color: demandCPO <= 550 ? 'text-emerald-600' : demandCPO <= 800 ? 'text-amber-600' : 'text-red-500' },
+                ].map(m => (
+                  <div key={m.label} className="bg-slate-50 rounded-lg p-2.5">
+                    <div className="text-xs text-slate-400 mb-1">{m.label}</div>
+                    {m.value === null ? <Skeleton /> : <div className={`text-sm font-semibold ${m.color}`}>{m.value}</div>}
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-slate-400 mb-1 flex justify-between"><span>Budget pacing</span><span className={Math.round(demandSpend / 152000 * 100) > 80 ? 'text-emerald-600' : 'text-amber-600'}>{Math.round(demandSpend / 152000 * 100)}% used</span></div>
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(Math.round(demandSpend / 152000 * 100), 100)}%` }} /></div>
+              <div className="mt-3">
+                <div className="text-xs text-slate-500 font-medium mb-2">Top campaigns by first orders</div>
+                {loading ? <Skeleton /> : demandCampaigns.filter(c => Number(c.first_orders) > 0).sort((a, b) => Number(b.first_orders) - Number(a.first_orders)).slice(0, 3).map(c => (
+                  <div key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="flex items-center justify-between py-1.5 border-b border-slate-50 cursor-pointer hover:bg-slate-50 px-1 rounded">
+                    <span className="text-xs text-slate-700 truncate flex-1 mr-2">{c.campaign_name}</span>
+                    <span className="text-xs text-blue-600 font-medium flex-shrink-0">{Number(c.first_orders)} orders · ₹{Math.round(c.cpo)} CPO</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── SECTION 3: KPI summary bar ── */}
         <div className="grid grid-cols-5 gap-3">
           {[
-            { label: 'Total spend', value: loading ? null : totalSpend >= 100000 ? `₹${(totalSpend / 100000).toFixed(2)}L` : `₹${Math.round(totalSpend / 1000)}K`, sub: `of ₹3.5L budget · ${activeRangeTag}`, delta: 'On track · 49% paced', trend: 'up' },
-            { label: 'Total installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), sub: 'App installs · all campaigns', delta: '+12% vs last month', trend: 'up' },
-            { label: 'Cost per install', value: loading ? null : avgCPI > 0 ? `₹${avgCPI}` : '—', sub: 'Target: ₹120', delta: avgCPI > 0 && avgCPI < 120 ? `${Math.round((1 - avgCPI / 120) * 100)}% below target` : avgCPI >= 120 ? `${Math.round((avgCPI / 120 - 1) * 100)}% above target` : '—', trend: avgCPI > 0 && avgCPI < 120 ? 'up' : 'down' },
-            { label: 'Total clicks', value: loading ? null : totalClicks.toLocaleString('en-IN'), sub: `Avg CTR: ${avgCTR}%`, delta: 'flat vs last week', trend: 'flat' },
-            { label: 'First orders (Branch)', value: loading ? null : campaigns.reduce((a, c) => a + Number(c.first_orders), 0).toString(), sub: `Avg CPO: ${totals?.cpo > 0 ? '₹' + Math.round(totals.cpo) : '—'}`, delta: totals?.cpo > 0 && totals.cpo <= 800 ? `₹${Math.round(totals.cpo)} CPO · on target` : totals?.cpo > 800 ? `₹${Math.round(totals.cpo)} CPO · above ₹800 target` : 'Awaiting first order data', trend: totals?.cpo > 0 && totals.cpo <= 800 ? 'up' : 'down' },
+            { label: 'Total MTD spend', value: loading ? null : fmtL(totalSpend), sub: `of ₹3.5L budget`, delta: `${budgetPacing}% paced`, trend: budgetPacing >= 40 && budgetPacing <= 90 ? 'up' : 'down', icon: <BarChart2 size={14} /> },
+            { label: 'Total installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), sub: 'All campaigns', delta: `CPI ₹${avgCPI}`, trend: avgCPI <= 20 ? 'up' : 'flat', icon: <Users size={14} /> },
+            { label: 'First orders', value: loading ? null : totalFirstOrders > 0 ? totalFirstOrders.toString() : '—', sub: 'Post-install conversions', delta: totals?.cpo > 0 ? `CPO ₹${Math.round(totals.cpo)}` : 'Awaiting data', trend: totals?.cpo > 0 && totals.cpo <= 800 ? 'up' : 'flat', icon: <ShoppingBag size={14} /> },
+            { label: 'Avg CTR', value: loading ? null : `${avgCTR}%`, sub: 'Across all placements', delta: Number(avgCTR) >= 1 ? 'Above 1% target' : 'Below 1% target', trend: Number(avgCTR) >= 1 ? 'up' : 'down', icon: <Activity size={14} /> },
+            { label: 'Account health', value: loading ? null : `${health}/100`, sub: healthStatus, delta: criticalCount > 0 ? `${criticalCount} critical alerts` : 'All systems good', trend: health >= 80 ? 'up' : health >= 60 ? 'flat' : 'down', icon: <Target size={14} /> },
           ].map(k => (
             <div key={k.label} className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="text-xs text-slate-400 mb-1.5">{k.label}</div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">{k.icon}{k.label}</div>
               {k.value === null ? <div className="space-y-1.5 mt-1"><Skeleton /><Skeleton /></div> : (
                 <>
                   <div className="text-xl font-semibold text-slate-800 leading-none">{k.value}</div>
@@ -443,87 +494,132 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Trend chart */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div><span className="text-sm font-semibold text-slate-700">Performance trends</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
-            <div className="flex gap-1.5 flex-wrap">
-              {(['spend', 'installs', 'clicks', 'ctr', 'cpi'] as const).map(key => (
-                <button key={key} onClick={() => setActiveMetric(key)}
-                  className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                </button>
-              ))}
+        {/* ── SECTION 4: Trend chart + alerts ── */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div><span className="text-sm font-semibold text-slate-700">Performance trends</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
+              <div className="flex gap-1.5 flex-wrap">
+                {(['spend', 'installs', 'clicks', 'ctr', 'cpi'] as const).map(key => (
+                  <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                    {key.charAt(0).toUpperCase() + key.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ position: 'relative', height: '160px' }}>
+              {loading ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading chart...</div> : <canvas id="trendCanvas" />}
+            </div>
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+              <div className="flex gap-6">
+                <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{loading ? '—' : fmtMetric(avgMetric)}</div></div>
+                <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{loading ? '—' : peakLabel}</div></div>
+                <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{loading ? '—' : lowLabel}</div></div>
+              </div>
+              <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse ↗</button>
             </div>
           </div>
-          <div style={{ position: 'relative', height: '180px' }}>
-            {loading ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading chart...</div> : <canvas id="trendCanvas" />}
-          </div>
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-            <div className="flex gap-6">
-              <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{loading ? '—' : fmtMetric(avgMetric)}</div></div>
-              <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{loading ? '—' : peakLabel}</div></div>
-              <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{loading ? '—' : lowLabel}</div></div>
+
+          {/* Alerts + health */}
+          <div className="flex flex-col gap-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 flex-1">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Bell size={13} className="text-slate-400" />Alerts</span>
+                {criticalCount > 0 && <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">{criticalCount} critical</span>}
+              </div>
+              {loading ? <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}</div> :
+                alerts.length === 0 ? <div className="text-xs text-emerald-600 py-2 flex items-center gap-1.5"><CheckCircle size={12} />All campaigns healthy</div> :
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {alerts.map((a, i) => (
+                      <div key={i} className="flex gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-amber-400'}`} />
+                        <div><div className="text-xs text-slate-700 leading-snug">{a.msg}</div><div className="text-xs text-slate-400 mt-0.5">{a.time}</div></div>
+                      </div>
+                    ))}
+                  </div>
+              }
             </div>
-            <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse trend ↗</button>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-slate-700">Account health</span>
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: healthColor + '20', color: healthColor }}>{health}/100 · {healthStatus}</span>
+              </div>
+              <div className="space-y-1.5">
+                {(healthBreakdown.length > 0 ? healthBreakdown : [
+                  { label: 'Budget pacing', score: 0, max: 20 }, { label: 'CPI vs target', score: 0, max: 20 },
+                  { label: 'CTR quality', score: 0, max: 15 }, { label: 'Ad strength', score: 0, max: 15 },
+                  { label: 'Reach diversity', score: 0, max: 15 }, { label: 'Wasted spend', score: 0, max: 15 },
+                ]).map(s => (
+                  <div key={s.label} className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 w-24 flex-shrink-0">{s.label}</span>
+                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(s.score / s.max) * 100}%`, background: scoreColor(s.score, s.max) }} />
+                    </div>
+                    <span className="text-xs font-medium text-slate-600 w-4 text-right">{s.score}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Main grid */}
-        <div className="grid grid-cols-5 gap-3">
-          {/* Campaign table */}
-          <div className="col-span-3 bg-white rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div><span className="text-sm font-semibold text-slate-700">Campaign performance</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
-              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{campaigns.length} campaigns</span>
+        {/* ── SECTION 5: Campaign table ── */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div><span className="text-sm font-semibold text-slate-700">All campaigns</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">{campaigns.length} campaigns</span>
+              <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1 rounded-lg border border-slate-200 text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI ↗</button>
             </div>
-            <table className="w-full" style={{ tableLayout: 'fixed' }}>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ tableLayout: 'fixed', minWidth: '800px' }}>
               <thead>
                 <tr className="text-xs text-slate-400 border-b border-slate-100">
                   <th className="text-left pb-2 font-medium w-2/5">Campaign</th>
                   <th className="text-right pb-2 font-medium w-16">Spend</th>
                   <th className="text-right pb-2 font-medium w-16">Installs</th>
-                  <th className="text-right pb-2 font-medium w-12">CPI</th>
-                  <th className="text-right pb-2 font-medium w-14">1st Orders</th>
-                  <th className="text-right pb-2 font-medium w-12">CPO</th>
-                  <th className="text-right pb-2 font-medium w-10">CTR</th>
-                  <th className="text-right pb-2 font-medium w-20">Objective</th>
+                  <th className="text-right pb-2 font-medium w-14">CPI</th>
+                  <th className="text-right pb-2 font-medium w-16">1st Orders</th>
+                  <th className="text-right pb-2 font-medium w-14">CPO</th>
+                  <th className="text-right pb-2 font-medium w-12">CTR</th>
+                  <th className="text-right pb-2 font-medium w-20">Type</th>
                   <th className="w-5"></th>
                 </tr>
               </thead>
               <tbody>
-                {loading ? Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-slate-50">{Array.from({ length: 6 }).map((_, j) => <td key={j} className="py-2.5 pl-2"><Skeleton /></td>)}</tr>
-                )) : campaigns.map(c => (
-                  <tr key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer group">
-                    <td className="py-2.5"><div className="text-xs font-medium text-slate-800 truncate">{c.campaign_name}</div></td>
-                    <td className="text-right text-xs text-slate-700">₹{(Number(c.spend) / 1000).toFixed(1)}K</td>
-                    <td className="text-right text-xs">{Number(c.installs) > 0 ? <span className={Number(c.installs) > 1000 ? 'text-emerald-600 font-medium' : 'text-slate-700'}>{Number(c.installs).toLocaleString('en-IN')}</span> : <span className="text-slate-400">—</span>}</td>
-                    <td className="text-right"><CpiColor val={Number(c.cpi)} /></td>
-                    <td className="text-right text-xs">
-                      {Number(c.first_orders) > 0
-                        ? <span className="font-medium text-emerald-600">{Number(c.first_orders)}</span>
-                        : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="text-right text-xs">
-                      {Number(c.cpo) > 0
-                        ? <span className={Number(c.cpo) <= 800 ? 'font-medium text-emerald-600' : Number(c.cpo) <= 1500 ? 'font-medium text-amber-600' : 'font-medium text-red-500'}>₹{Math.round(Number(c.cpo))}</span>
-                        : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className={`text-right text-xs ${Number(c.ctr) < 0.3 ? 'text-red-500 font-medium' : 'text-slate-700'}`}>{Number(c.ctr).toFixed(2)}%</td>
-                    <td className="text-right"><ObjBadge obj={c.objective} /></td>
-                    <td className="text-right"><ChevronRight size={12} className="text-slate-300 group-hover:text-slate-500" /></td>
-                  </tr>
-                ))}
+                {loading ? Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i} className="border-b border-slate-50">{Array.from({ length: 7 }).map((_, j) => <td key={j} className="py-2.5 pl-2"><Skeleton /></td>)}</tr>
+                )) : campaigns.map(c => {
+                  const isSupply = supplyCampaigns.includes(c)
+                  return (
+                    <tr key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer group">
+                      <td className="py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSupply ? 'bg-purple-400' : 'bg-blue-400'}`} />
+                          <span className="text-xs font-medium text-slate-800 truncate">{c.campaign_name}</span>
+                        </div>
+                      </td>
+                      <td className="text-right text-xs text-slate-700">{fmtL(Number(c.spend))}</td>
+                      <td className="text-right text-xs">{Number(c.installs) > 0 ? <span className={Number(c.installs) > 1000 ? 'text-emerald-600 font-medium' : 'text-slate-700'}>{Number(c.installs).toLocaleString('en-IN')}</span> : <span className="text-slate-400">—</span>}</td>
+                      <td className="text-right"><CpiPill val={Number(c.cpi)} /></td>
+                      <td className="text-right text-xs">{Number(c.first_orders) > 0 ? <span className="font-medium text-blue-600">{Number(c.first_orders)}</span> : <span className="text-slate-300">—</span>}</td>
+                      <td className="text-right text-xs">{Number(c.cpo) > 0 ? <span className={Number(c.cpo) <= 800 ? 'font-medium text-emerald-600' : 'font-medium text-amber-600'}>₹{Math.round(Number(c.cpo))}</span> : <span className="text-slate-300">—</span>}</td>
+                      <td className={`text-right text-xs ${Number(c.ctr) < 0.3 ? 'text-red-500 font-medium' : 'text-slate-700'}`}>{Number(c.ctr).toFixed(2)}%</td>
+                      <td className="text-right"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isSupply ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{isSupply ? 'Supply' : 'Demand'}</span></td>
+                      <td className="text-right"><ChevronRight size={12} className="text-slate-300 group-hover:text-slate-500" /></td>
+                    </tr>
+                  )
+                })}
               </tbody>
               {!loading && campaigns.length > 0 && (
                 <tfoot>
                   <tr className="border-t border-slate-200">
                     <td className="pt-2 text-xs font-semibold text-slate-700">Total</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">₹{(totalSpend / 100000).toFixed(2)}L</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{fmtL(totalSpend)}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{totalInstalls.toLocaleString('en-IN')}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">₹{avgCPI}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{campaigns.reduce((a,c) => a + Number(c.first_orders), 0)}</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-blue-600">{totalFirstOrders}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">{totals?.cpo > 0 ? `₹${Math.round(totals.cpo)}` : '—'}</td>
                     <td className="pt-2 text-right text-xs font-semibold text-slate-700">{avgCTR}%</td>
                     <td /><td />
@@ -531,74 +627,6 @@ export default function Dashboard() {
                 </tfoot>
               )}
             </table>
-          </div>
-
-          {/* Right column */}
-          <div className="col-span-2 flex flex-col gap-3">
-            {/* Health score */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-700">Account health</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${healthBadgeColor}`}>{loading ? '—' : health}/100 · {healthStatus}</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-center flex-shrink-0">
-                  <div className="text-4xl font-semibold text-slate-800 leading-none">{loading ? '—' : health}</div>
-                  <div className="text-xs text-slate-400 mt-1">out of 100</div>
-                </div>
-                <div className="flex-1 space-y-1.5">
-                  {(healthBreakdown.length > 0 ? healthBreakdown : [
-                    { label: 'Budget pacing', score: 0, max: 20 }, { label: 'CPI vs target', score: 0, max: 20 },
-                    { label: 'CTR quality', score: 0, max: 15 }, { label: 'Ad strength', score: 0, max: 15 },
-                    { label: 'Reach diversity', score: 0, max: 15 }, { label: 'Wasted spend', score: 0, max: 15 },
-                  ]).map(s => (
-                    <div key={s.label} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 w-24 flex-shrink-0">{s.label}</span>
-                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full transition-all" style={{ width: `${(s.score / s.max) * 100}%`, background: scoreColor(s.score, s.max) }} />
-                      </div>
-                      <span className="text-xs font-medium text-slate-700 w-4 text-right">{s.score}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Alerts */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Bell size={13} className="text-slate-400" />Alerts</span>
-                {criticalCount > 0 && <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">{criticalCount} critical</span>}
-              </div>
-              {loading ? <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}</div> :
-                alerts.length === 0 ? <div className="text-xs text-emerald-600 py-2">✓ No active alerts — all campaigns healthy</div> :
-                  alerts.map((a, i) => (
-                    <div key={i} className="flex gap-2 py-2 border-b border-slate-50 last:border-0">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-amber-500'}`} />
-                      <div>
-                        <div className="text-xs text-slate-700 leading-snug">{a.msg}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">{a.time}</div>
-                      </div>
-                    </div>
-                  ))
-              }
-            </div>
-
-            {/* Spend by objective */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="text-sm font-semibold text-slate-700 mb-3">Spend by objective</div>
-              <div style={{ position: 'relative', height: '100px' }}>
-                {loading ? <div className="flex items-center justify-center h-full"><Skeleton /></div> : <canvas id="objCanvas" />}
-              </div>
-              <div className="flex gap-3 mt-3 flex-wrap">
-                {[{ color: '#378ADD', label: 'Installs', pct: `${installPct}%` }, { color: '#534AB7', label: 'Leads', pct: `${leadPct}%` }, { color: '#EF9F27', label: 'Awareness', pct: `${awarenessPct}%` }].map(o => (
-                  <div key={o.label} className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: o.color }} />
-                    <span className="text-xs text-slate-500">{o.label} <span className="font-medium text-slate-700">{o.pct}</span></span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>
