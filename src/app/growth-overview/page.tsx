@@ -625,7 +625,9 @@ export default function GrowthOverviewPage() {
                           <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#6B7280' }}>Campaign</th>
                           <SortTh col="spend" label="Spend" />
                           <SortTh col="installs" label="Installs" />
-                          <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#6B7280', minWidth: 140 }}>CPI vs target</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#6B7280', minWidth: 140 }}>
+                            {tableTab === 'supply' ? 'CPI vs target (₹20)' : tableTab === 'demand' ? 'CPO vs target (₹550)' : 'CPI / CPO vs target'}
+                          </th>
                           <SortTh col="orders" label="1st orders" />
                           <SortTh col="cpo" label="CPO" />
                           <SortTh col="ctr" label="CTR" />
@@ -658,6 +660,7 @@ export default function GrowthOverviewPage() {
                               <td style={{ padding: '9px 10px', textAlign: 'right', color: c.installs > 1000 ? '#059669' : '#374151', fontWeight: c.installs > 1000 ? 600 : 400 }}>{c.installs > 0 ? fmt(c.installs) : '—'}</td>
                               <td style={{ padding: '9px 10px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 10, color: '#9CA3AF', minWidth: 28, flexShrink: 0 }}>{isSupply ? 'CPI' : 'CPO'}</span>
                                   <span style={{ fontSize: 11, fontWeight: 600, color: barColor, minWidth: 32 }}>{val > 0 ? `₹${Math.round(val)}` : '—'}</span>
                                   <div style={{ flex: 1, height: 4, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden', minWidth: 60 }}>
                                     <div style={{ width: `${barPct}%`, height: '100%', background: barColor, borderRadius: 2 }} />
