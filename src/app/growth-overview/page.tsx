@@ -48,7 +48,7 @@ export default function GrowthOverviewPage() {
   const [wifCpi, setWifCpi] = useState(9)
   const [wifCpiSpend, setWifCpiSpend] = useState(189000)
   const [wifCtr, setWifCtr] = useState(0.8)
-  const [tableSortCol, setTableSortCol] = useState<'spend'|'installs'|'cpi'|'orders'|'cpo'|'ctr'>('spend')
+  const [tableSortCol, setTableSortCol] = useState<'spend'|'installs'|'orders'|'cpo'|'ctr'>('spend')
   const [tableSortDir, setTableSortDir] = useState<'asc'|'desc'>('desc')
   const [tableTab, setTableTab] = useState<'all'|'supply'|'demand'>('all')
 
@@ -566,7 +566,7 @@ export default function GrowthOverviewPage() {
 
               const getFlag = (c: any) => {
                 const isSupply = c.side === 'supply'
-                const cpi = Number(c.cpi || 0)
+                const cpi = c.installs > 0 ? Math.round(c.spend / c.installs) : 0
                 const cpo = Number(c.cpo || 0)
                 const ctr = parseFloat(c.ctr || '0')
                 const installs = Number(c.installs || 0)
@@ -629,7 +629,7 @@ export default function GrowthOverviewPage() {
                       <tbody>
                         {sorted.map((c, i) => {
                           const isSupply = c.side === 'supply'
-                          const cpi = Number(c.cpi || 0)
+                          const cpi = c.installs > 0 ? Math.round(c.spend / c.installs) : 0
                           const cpo = Number(c.cpo || 0)
                           const target = isSupply ? SUPPLY_CPI_TARGET : DEMAND_CPO_TARGET
                           const val = isSupply ? cpi : cpo
