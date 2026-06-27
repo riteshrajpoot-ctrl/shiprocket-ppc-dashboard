@@ -427,8 +427,29 @@ export default function Dashboard() {
               onClick={() => window.location.href = '/branch'}
             />
 
-            {/* Affiliate — coming soon */}
-            <ChannelCard icon="A" name="Affiliate" status="soon" color="bg-orange-500" />
+            {/* Affiliate — real data from Branch by_partner */}
+            {(() => {
+              const affiliatePartners = (branchData?.by_partner || []).filter((p: any) => {
+                const pl = (p.partner || '').toLowerCase()
+                return !pl.includes('google') && !pl.includes('facebook') && !pl.includes('meta') && !pl.includes('apple') && pl !== '(organic)' && pl !== 'organic' && p.partner !== '(organic)'
+              })
+              const affiliateInstalls = affiliatePartners.reduce((a: number, p: any) => a + p.installs, 0)
+              const affiliateOrders = affiliatePartners.reduce((a: number, p: any) => a + p.orders, 0)
+              const topPartner = affiliatePartners.sort((a: any, b: any) => b.orders - a.orders)[0]
+
+              return (
+                <ChannelCard
+                  icon="A" name="Affiliate" status={affiliateInstalls > 0 ? 'beta' : 'soon'} color="bg-orange-500"
+                  metrics={affiliateInstalls > 0 ? [
+                    { label: 'Installs', value: branchLoading ? null : affiliateInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
+                    { label: 'First orders', value: branchLoading ? null : affiliateOrders > 0 ? affiliateOrders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
+                    { label: 'Partners', value: branchLoading ? null : `${affiliatePartners.length} active` },
+                    { label: 'Top partner', value: branchLoading ? null : topPartner ? topPartner.partner : '—', color: 'text-orange-600' },
+                  ] : undefined}
+                  onClick={affiliateInstalls > 0 ? () => setActivePartner('Affiliate') : undefined}
+                />
+              )
+            })()}
           </div>
         </div>
 
