@@ -48,6 +48,9 @@ export default function GrowthOverviewPage() {
   const [wifCpi, setWifCpi] = useState(9)
   const [wifCpiSpend, setWifCpiSpend] = useState(189000)
   const [wifCtr, setWifCtr] = useState(0.8)
+  const [tableSortCol, setTableSortCol] = useState<'spend'|'installs'|'cpi'|'orders'|'cpo'|'ctr'>('spend')
+  const [tableSortDir, setTableSortDir] = useState<'asc'|'desc'>('desc')
+  const [tableTab, setTableTab] = useState<'all'|'supply'|'demand'>('all')
 
   const fetchData = async () => {
     setLoading(true); setError('')
@@ -546,6 +549,133 @@ export default function GrowthOverviewPage() {
                 )
               })}
             </div>
+
+            {/* ── Enhanced Meta campaign table ── */}
+            {(() => {
+              const allCampaigns = [
+                ...(data.supply.topCampaigns || []).map(c => ({ ...c, side: 'supply' as const })),
+                ...(data.demand.topCampaigns || []).map(c => ({ ...c, side: 'demand' as const })),
+              ]
+
+              const filtered = tableTab === 'all' ? allCampaigns : allCampaigns.filter(c => c.side === tableTab)
+              const sorted = [...filtered].sort((a, b) => {
+                const av = Number((a as any)[tableSortCol] || 0)
+                const bv = Number((b as any)[tableSortCol] || 0)
+                return tableSortDir === 'desc' ? bv - av : av - bv
+              })
+
+              const getFlag = (c: any) => {
+                const isSupply = c.side === 'supply'
+                const cpi = Number(c.cpi || 0)
+                const cpo = Number(c.cpo || 0)
+                const ctr = parseFloat(c.ctr || '0')
+                const installs = Number(c.installs || 0)
+                const orders = Number(c.orders || 0)
+                if (isSupply) {
+                  if (cpi > 0 && cpi <= SUPPLY_CPI_TARGET * 0.6) return { label: 'Scale', color: '#059669', bg: '#ECFDF5' }
+                  if (cpi > SUPPLY_CPI_TARGET * 1.5) return { label: 'High CPI', color: '#DC2626', bg: '#FEF2F2' }
+                  if (ctr < 0.5) return { label: 'Low CTR', color: '#D97706', bg: '#FFFBEB' }
+                  if (installs > 1000 && cpi <= SUPPLY_CPI_TARGET) return { label: 'Invest', color: '#059669', bg: '#ECFDF5' }
+                  return { label: 'Watch', color: '#D97706', bg: '#FFFBEB' }
+                } else {
+                  if (cpo > 0 && cpo <= DEMAND_CPO_TARGET * 0.7) return { label: 'Scale', color: '#059669', bg: '#ECFDF5' }
+                  if (cpo > DEMAND_CPO_TARGET * 1.5) return { label: 'High CPO', color: '#DC2626', bg: '#FEF2F2' }
+                  if (orders > 0 && cpo <= DEMAND_CPO_TARGET) return { label: 'Watch', color: '#D97706', bg: '#FFFBEB' }
+                  if (installs > 0 && orders === 0) return { label: 'No orders', color: '#9CA3AF', bg: '#F3F4F6' }
+                  return { label: 'Watch', color: '#D97706', bg: '#FFFBEB' }
+                }
+              }
+
+              const SortTh = ({ col, label }: { col: typeof tableSortCol; label: string }) => (
+                <th onClick={() => { if (tableSortCol === col) setTableSortDir(d => d === 'desc' ? 'asc' : 'desc'); else { setTableSortCol(col); setTableSortDir('desc') } }}
+                  style={{ padding: '8px 10px', textAlign: 'right', fontSize: 11, fontWeight: 600, color: tableSortCol === col ? '#4F46E5' : '#6B7280', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' as const }}>
+                  {label} {tableSortCol === col ? (tableSortDir === 'desc' ? '↓' : '↑') : ''}
+                </th>
+              )
+
+              return (
+                <div style={{ background: '#fff', border: '.5px solid #E5E7EB', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: '#111827', margin: '0 0 2px' }}>Campaign performance</p>
+                      <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>CPI vs target · smart flags · click headers to sort · {sorted.length} campaigns</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {(['all', 'supply', 'demand'] as const).map(tab => (
+                        <button key={tab} onClick={() => setTableTab(tab)} style={{
+                          padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 500, cursor: 'pointer', border: '.5px solid',
+                          borderColor: tableTab === tab ? '#6366F1' : '#E5E7EB',
+                          background: tableTab === tab ? '#EEF2FF' : 'transparent',
+                          color: tableTab === tab ? '#4F46E5' : '#6B7280',
+                        }}>{tab.charAt(0).toUpperCase() + tab.slice(1)}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '.5px solid #F3F4F6', background: '#F9FAFB' }}>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#6B7280' }}>Campaign</th>
+                          <SortTh col="spend" label="Spend" />
+                          <SortTh col="installs" label="Installs" />
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#6B7280', minWidth: 140 }}>CPI vs target</th>
+                          <SortTh col="orders" label="1st orders" />
+                          <SortTh col="cpo" label="CPO" />
+                          <SortTh col="ctr" label="CTR" />
+                          <th style={{ padding: '8px 10px', textAlign: 'center', fontSize: 11, fontWeight: 600, color: '#6B7280' }}>Type</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'center', fontSize: 11, fontWeight: 600, color: '#6B7280' }}>Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sorted.map((c, i) => {
+                          const isSupply = c.side === 'supply'
+                          const cpi = Number(c.cpi || 0)
+                          const cpo = Number(c.cpo || 0)
+                          const target = isSupply ? SUPPLY_CPI_TARGET : DEMAND_CPO_TARGET
+                          const val = isSupply ? cpi : cpo
+                          const barPct = val > 0 ? Math.min((val / target) * 100, 100) : 0
+                          const barColor = val <= target * 0.75 ? '#059669' : val <= target ? '#D97706' : '#DC2626'
+                          const flag = getFlag(c)
+                          return (
+                            <tr key={i} style={{ borderBottom: '.5px solid #F9FAFB' }}
+                              onMouseEnter={e => (e.currentTarget.style.background = '#F9FAFB')}
+                              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                              <td style={{ padding: '9px 10px', maxWidth: 200 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: isSupply ? '#7C3AED' : '#185FA5', flexShrink: 0 }} />
+                                  <span style={{ fontSize: 12, fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                                </div>
+                              </td>
+                              <td style={{ padding: '9px 10px', textAlign: 'right', color: '#374151', fontWeight: 500 }}>{fmtK(c.spend)}</td>
+                              <td style={{ padding: '9px 10px', textAlign: 'right', color: c.installs > 1000 ? '#059669' : '#374151', fontWeight: c.installs > 1000 ? 600 : 400 }}>{c.installs > 0 ? fmt(c.installs) : '—'}</td>
+                              <td style={{ padding: '9px 10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: barColor, minWidth: 32 }}>{val > 0 ? `₹${Math.round(val)}` : '—'}</span>
+                                  <div style={{ flex: 1, height: 4, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden', minWidth: 60 }}>
+                                    <div style={{ width: `${barPct}%`, height: '100%', background: barColor, borderRadius: 2 }} />
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ padding: '9px 10px', textAlign: 'right', color: (c.orders || 0) > 0 ? '#059669' : '#9CA3AF', fontWeight: (c.orders || 0) > 0 ? 600 : 400 }}>{(c.orders || 0) > 0 ? fmt(c.orders || 0) : '—'}</td>
+                              <td style={{ padding: '9px 10px', textAlign: 'right', color: cpo > 0 && cpo <= DEMAND_CPO_TARGET ? '#059669' : cpo > DEMAND_CPO_TARGET ? '#DC2626' : '#9CA3AF' }}>{cpo > 0 ? `₹${fmt(cpo)}` : '—'}</td>
+                              <td style={{ padding: '9px 10px', textAlign: 'right', color: parseFloat(c.ctr) >= 1 ? '#059669' : parseFloat(c.ctr) >= 0.5 ? '#D97706' : '#DC2626' }}>{c.ctr}%</td>
+                              <td style={{ padding: '9px 10px', textAlign: 'center' }}>
+                                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 500, background: isSupply ? '#F5F3FF' : '#EFF6FF', color: isSupply ? '#3C3489' : '#185FA5' }}>
+                                  {isSupply ? 'supply' : 'demand'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '9px 10px', textAlign: 'center' }}>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: flag.bg, color: flag.color }}>{flag.label}</span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* ── Smart tools row ── */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
