@@ -14,9 +14,10 @@ export async function GET(req: NextRequest) {
   try {
     // Fetch ad-level insights with creative fields
     const insightsUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
-    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions,publisher_platform,platform_position')
+    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions')
     insightsUrl.searchParams.set('level', 'ad')
     if (withPlacement) {
+      insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions,publisher_platform,platform_position')
       insightsUrl.searchParams.set('breakdowns', 'publisher_platform,platform_position')
     }
     insightsUrl.searchParams.set('time_range[since]', dateStart)
