@@ -54,20 +54,22 @@ function ObjBadge({ obj }: { obj: string }) {
 }
 
 // ── Channel Card ──────────────────────────────────────────────────────────────
-function ChannelCard({ icon, name, status, color, spend, installs, firstOrders, cpi, cpo, ctr, budget, budgetUsed, onClick }: any) {
-  const paced = budgetUsed ? Math.round(budgetUsed) : null
+function ChannelCard({ icon, name, status, color, metrics, budgetUsed, onClick }: {
+  icon: string; name: string; status: string; color: string
+  metrics?: { label: string; value: string | null; color?: string }[]
+  budgetUsed?: number | null; onClick?: () => void
+}) {
   const statusConfig: Record<string, { dot: string; label: string }> = {
     live: { dot: 'bg-emerald-500', label: 'Live' },
     beta: { dot: 'bg-amber-400', label: 'Beta' },
     soon: { dot: 'bg-slate-300', label: 'Soon' },
-    connecting: { dot: 'bg-blue-400 animate-pulse', label: 'Connecting' },
   }
   const s = statusConfig[status] || statusConfig.soon
   const isActive = status === 'live' || status === 'beta'
 
   return (
-    <div onClick={isActive ? onClick : undefined}
-      className={`bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-3 ${isActive ? 'cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all' : 'opacity-60'}`}>
+    <div onClick={isActive && onClick ? onClick : undefined}
+      className={`bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-3 ${isActive && onClick ? 'cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all' : isActive ? '' : 'opacity-60'}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold ${color}`}>{icon}</div>
@@ -79,47 +81,34 @@ function ChannelCard({ icon, name, status, color, spend, installs, firstOrders, 
             </div>
           </div>
         </div>
-        {isActive && <ExternalLink size={12} className="text-slate-300" />}
+        {isActive && onClick && <ExternalLink size={12} className="text-slate-300" />}
       </div>
 
-      {isActive ? (
+      {isActive && metrics ? (
         <>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-xs text-slate-400 mb-0.5">Spend MTD</div>
-              <div className="text-sm font-semibold text-slate-800">{spend ? fmtL(spend) : '—'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-xs text-slate-400 mb-0.5">Installs</div>
-              <div className="text-sm font-semibold text-emerald-600">{installs ? Number(installs).toLocaleString('en-IN') : '—'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-xs text-slate-400 mb-0.5">First orders</div>
-              <div className="text-sm font-semibold text-slate-800">{firstOrders ? Number(firstOrders).toLocaleString('en-IN') : '—'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-xs text-slate-400 mb-0.5">CPI / CPO</div>
-              <div className="text-sm font-semibold text-slate-800">
-                {cpi ? `₹${Math.round(cpi)}` : '—'} {cpo ? <span className="text-xs text-slate-500">/ ₹{Math.round(cpo)}</span> : ''}
+            {metrics.map(m => (
+              <div key={m.label} className="bg-slate-50 rounded-lg p-2.5">
+                <div className="text-xs text-slate-400 mb-0.5">{m.label}</div>
+                <div className={`text-sm font-semibold ${m.color || 'text-slate-800'}`}>{m.value ?? '—'}</div>
               </div>
-            </div>
+            ))}
           </div>
-          {paced !== null && (
+          {budgetUsed != null && (
             <div>
               <div className="flex justify-between text-xs text-slate-400 mb-1">
                 <span>Budget pacing</span>
-                <span className={paced > 80 ? 'text-emerald-600' : paced < 50 ? 'text-amber-600' : 'text-slate-500'}>{paced}% used</span>
+                <span className={budgetUsed > 90 ? 'text-red-500' : budgetUsed > 70 ? 'text-emerald-600' : 'text-amber-600'}>{budgetUsed}% used</span>
               </div>
               <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(paced, 100)}%`, background: paced > 90 ? '#E24B4A' : paced > 70 ? '#EF9F27' : '#1D9E75' }} />
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(budgetUsed, 100)}%`, background: budgetUsed > 90 ? '#E24B4A' : budgetUsed > 70 ? '#1D9E75' : '#EF9F27' }} />
               </div>
             </div>
           )}
-          {ctr && <div className="text-xs text-slate-400">CTR <span className={`font-medium ${Number(ctr) >= 1 ? 'text-emerald-600' : Number(ctr) >= 0.5 ? 'text-amber-600' : 'text-red-500'}`}>{Number(ctr).toFixed(2)}%</span></div>}
         </>
-      ) : (
+      ) : !isActive ? (
         <div className="text-xs text-slate-400 text-center py-4">Integration coming soon</div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -379,19 +368,36 @@ export default function Dashboard() {
         <div>
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Channel overview</div>
           <div className="grid grid-cols-4 gap-3">
+
+            {/* Meta Ads — show ad spend + installs + CPI + CTR */}
             <ChannelCard
               icon="M" name="Meta Ads" status="live" color="bg-blue-600"
-              spend={totalSpend} installs={totalInstalls} firstOrders={totalFirstOrders}
-              cpi={avgCPI} cpo={totals?.cpo > 0 ? totals.cpo : null} ctr={avgCTR}
-              budget={350000} budgetUsed={budgetPacing}
-              onClick={() => window.location.href = '/meta-ads'}
+              metrics={[
+                { label: 'Spend MTD', value: loading ? null : fmtL(totalSpend) },
+                { label: 'Installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
+                { label: 'Avg CPI', value: loading ? null : avgCPI > 0 ? `₹${avgCPI}` : '—', color: avgCPI <= 20 ? 'text-emerald-600' : avgCPI <= 50 ? 'text-amber-600' : 'text-red-500' },
+                { label: 'Avg CTR', value: loading ? null : `${avgCTR}%`, color: Number(avgCTR) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
+              ]}
+              budgetUsed={budgetPacing}
+              onClick={() => window.location.href = '/growth-overview'}
             />
+
+            {/* Google Ads — coming soon */}
             <ChannelCard icon="G" name="Google Ads" status="soon" color="bg-red-500" />
-            <ChannelCard icon="B" name="Branch" status="beta" color="bg-purple-600"
-              spend={null} installs={totalInstalls} firstOrders={totalFirstOrders}
-              cpi={null} cpo={totals?.cpo > 0 ? totals.cpo : null} ctr={null}
+
+            {/* Branch — attribution layer, show first orders + conversion rate only */}
+            <ChannelCard
+              icon="B" name="Branch" status="beta" color="bg-purple-600"
+              metrics={[
+                { label: 'First orders', value: loading ? null : totalFirstOrders > 0 ? totalFirstOrders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
+                { label: 'Install → order %', value: loading ? null : totalInstalls > 0 && totalFirstOrders > 0 ? `${((totalFirstOrders / totalInstalls) * 100).toFixed(1)}%` : '—' },
+                { label: 'Daily avg orders', value: loading ? null : totalFirstOrders > 0 ? `${Math.round(totalFirstOrders / Math.max(new Date().getDate(), 1))}` : '—', color: 'text-slate-600' },
+                { label: 'Conversion quality', value: loading ? null : totalFirstOrders > 0 && totalInstalls > 0 ? ((totalFirstOrders / totalInstalls) * 100) >= 1 ? 'Good' : ((totalFirstOrders / totalInstalls) * 100) >= 0.5 ? 'Watch' : 'Low' : '—', color: totalInstalls > 0 && ((totalFirstOrders / totalInstalls) * 100) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
+              ]}
               onClick={() => window.location.href = '/branch'}
             />
+
+            {/* Affiliate — coming soon */}
             <ChannelCard icon="A" name="Affiliate" status="soon" color="bg-orange-500" />
           </div>
         </div>
