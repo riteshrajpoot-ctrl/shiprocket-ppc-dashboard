@@ -288,7 +288,7 @@ export default function IntelligencePage() {
   const loadPlaybook = async () => {
     setPbLoading(true); setPbCells([]); setPbInsights([]); setPbAds([])
     try {
-      const res = await fetch(`/api/ad-level-report?date_start=${dateStart}&date_end=${dateEnd}`)
+      const res = await fetch(`/api/ad-level-report?date_start=${dateStart}&date_end=${dateEnd}&placement=true`)
       const data = await res.json()
       // Use real placement from API, fall back to name-based inference only if missing
       const enriched = (data.ads || []).map((ad: any) => ({
