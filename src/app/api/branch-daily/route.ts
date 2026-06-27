@@ -10,7 +10,7 @@ async function fetchDaily(branchKey: string, branchSecret: string, startDate: st
     end_date: endDate,
     data_source: dataSource,
     aggregation: 'total_count',
-    dimensions: ['timestamp'],
+    dimensions: ['last_attributed_touch_data_tilde_advertising_partner_name'],
     filters,
     granularity: 'day',
   }
@@ -55,28 +55,36 @@ export async function GET(request: Request) {
     // Fetch daily first orders
     const orderResults = await fetchDaily(branchKey, branchSecret, startDate, endDate, 'eo_custom_event', { name: ['first_order_created_fe'] })
 
-    // Build daily map
+    // Branch returns results with a `timestamp` field at top level when granularity=day
+    // Each result has: { result: { ...dimensions, total_count }, timestamp: '2026-06-01' }
     const dailyMap: Record<string, { date: string; installs: number; first_orders: number }> = {}
 
     for (const r of installResults) {
-      const res = r.result || {}
-      const date = (res.timestamp || '').split('T')[0]
+      // Try both possible date field locations
+      const date = r.timestamp?.split('T')[0] || r.result?.timestamp?.split('T')[0] || r.result?.date || ''
       if (!date) continue
       if (!dailyMap[date]) dailyMap[date] = { date, installs: 0, first_orders: 0 }
-      dailyMap[date].installs += res.total_count || 0
+      dailyMap[date].installs += r.result?.total_count || 0
     }
 
     for (const r of orderResults) {
-      const res = r.result || {}
-      const date = (res.timestamp || '').split('T')[0]
+      const date = r.timestamp?.split('T')[0] || r.result?.timestamp?.split('T')[0] || r.result?.date || ''
       if (!date) continue
       if (!dailyMap[date]) dailyMap[date] = { date, installs: 0, first_orders: 0 }
-      dailyMap[date].first_orders += res.total_count || 0
+      dailyMap[date].first_orders += r.result?.total_count || 0
     }
 
     const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date))
 
-    return NextResponse.json({ daily, date_range: { start: startDate, end: endDate } })
+    // Debug: also return raw sample so we can see structure if empty
+    const rawSample = installResults.slice(0, 2)
+
+    return NextResponse.json({
+      daily,
+      total: daily.length,
+      raw_sample: rawSample,
+      date_range: { start: startDate, end: endDate }
+    })
 
   } catch (err: any) {
     return NextResponse.json({ error: 'Branch daily API error', message: err.message }, { status: 500 })
