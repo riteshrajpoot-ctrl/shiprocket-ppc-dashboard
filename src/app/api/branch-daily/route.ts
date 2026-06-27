@@ -29,7 +29,10 @@ async function fetchChunk(branchKey: string, branchSecret: string, startDate: st
     end_date: endDate,
     data_source: dataSource,
     aggregation: 'total_count',
-    dimensions: [],
+    dimensions: [
+      'last_attributed_touch_data_tilde_campaign',
+      'last_attributed_touch_data_tilde_advertising_partner_name',
+    ],
     filters,
     granularity: 'day',
   }
@@ -115,7 +118,8 @@ export async function GET(request: Request) {
       for (const r of results) {
         const date = extractDate(r, chunks[i].start)
         if (dailyMap[date]) {
-          dailyMap[date].installs += r.result?.total_count || 0
+          // With dimensions, count is in r.result.total_count — sum across all campaign/partner combos per day
+          dailyMap[date].installs += Number(r.result?.total_count || 0)
         }
       }
     }
@@ -130,7 +134,7 @@ export async function GET(request: Request) {
       for (const r of results) {
         const date = extractDate(r, chunks[i].start)
         if (dailyMap[date]) {
-          dailyMap[date].first_orders += r.result?.total_count || 0
+          dailyMap[date].first_orders += Number(r.result?.total_count || 0)
         }
       }
     }
