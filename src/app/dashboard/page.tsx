@@ -477,6 +477,91 @@ export default function Dashboard() {
             <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse ↗</button>
           </div>
         </div>
+
+        {/* ── SECTION 3: Campaign breakdown — Branch all partners ── */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-sm font-semibold text-slate-700">Campaign breakdown</span>
+              <span className="text-xs text-slate-400 ml-2">Branch · all partners</span>
+            </div>
+            <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+              {branchData ? `${branchData.by_campaign?.length || 0} campaigns` : '—'}
+            </span>
+          </div>
+          {branchLoading ? (
+            <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} />)}</div>
+          ) : !branchData?.by_campaign?.length ? (
+            <div className="text-xs text-slate-400 py-4 text-center">No campaign data available</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full" style={{ tableLayout: 'fixed', minWidth: '700px' }}>
+                <thead>
+                  <tr className="text-xs text-slate-400 border-b border-slate-100">
+                    <th className="text-left pb-2 font-medium w-2/5">Campaign</th>
+                    <th className="text-left pb-2 font-medium w-32">Partner</th>
+                    <th className="text-right pb-2 font-medium w-20">Installs</th>
+                    <th className="text-right pb-2 font-medium w-20">Orders</th>
+                    <th className="text-right pb-2 font-medium w-20">CVR</th>
+                    <th className="text-center pb-2 font-medium w-32">Flag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchData.by_campaign.slice(0, 20).map((c: any, i: number) => {
+                    const cvr = c.installs > 0 ? ((c.orders / c.installs) * 100) : 0
+                    const cvrDisplay = c.installs > 0 ? `${cvr.toFixed(1)}%` : '—*'
+
+                    // Flag logic
+                    let flag = ''
+                    let flagColor = ''
+                    if (c.installs === 0 && c.orders > 0) { flag = '0 installs anomaly'; flagColor = 'bg-orange-50 text-orange-700' }
+                    else if (cvr > 50) { flag = 'Install anomaly'; flagColor = 'bg-red-50 text-red-700' }
+                    else if (cvr >= 20) { flag = 'Strong CVR'; flagColor = 'bg-emerald-50 text-emerald-700' }
+                    else if (cvr >= 10) { flag = 'Good CVR'; flagColor = 'bg-blue-50 text-blue-700' }
+                    else if (c.installs > 500 && cvr >= 15) { flag = 'Scale this'; flagColor = 'bg-emerald-50 text-emerald-700' }
+                    else if (c.installs < 10 && c.orders > 100) { flag = 'Minimal installs'; flagColor = 'bg-amber-50 text-amber-700' }
+                    else if (!c.ad_partner || c.ad_partner === '(organic)') { flag = 'No attribution'; flagColor = 'bg-red-50 text-red-700' }
+
+                    // Partner color
+                    const partnerColor = (p: string) => {
+                      const pl = (p || '').toLowerCase()
+                      if (pl.includes('google')) return 'text-blue-600'
+                      if (pl.includes('facebook') || pl.includes('meta')) return 'text-blue-500'
+                      if (pl.includes('apple')) return 'text-slate-600'
+                      if (pl.includes('organic') || p === '(organic)') return 'text-slate-400'
+                      return 'text-purple-600'
+                    }
+
+                    return (
+                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                        <td className="py-2.5 text-xs font-medium text-slate-800 truncate pr-2">{c.campaign || 'Not set'}</td>
+                        <td className={`py-2.5 text-xs font-medium truncate ${partnerColor(c.ad_partner)}`}>{c.ad_partner || 'Organic'}</td>
+                        <td className="py-2.5 text-right text-xs text-slate-700">{c.installs > 0 ? c.installs.toLocaleString('en-IN') : '—'}</td>
+                        <td className="py-2.5 text-right text-xs font-semibold text-emerald-600">{c.orders > 0 ? c.orders.toLocaleString('en-IN') : '—'}</td>
+                        <td className={`py-2.5 text-right text-xs font-medium ${cvr >= 20 ? 'text-emerald-600' : cvr >= 10 ? 'text-blue-600' : 'text-slate-500'}`}>{cvrDisplay}</td>
+                        <td className="py-2.5 text-center">
+                          {flag && <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${flagColor}`}>{flag}</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-200">
+                    <td className="pt-2 text-xs font-semibold text-slate-700">Total</td>
+                    <td />
+                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{branchData.total_installs?.toLocaleString('en-IN')}</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{branchData.total_orders?.toLocaleString('en-IN')}</td>
+                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">
+                      {branchData.total_installs > 0 ? `${((branchData.total_orders / branchData.total_installs) * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
