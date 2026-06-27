@@ -301,9 +301,9 @@ export default function Dashboard() {
   const avgCPI = totalInstalls > 0 ? Math.round(totalSpend / totalInstalls) : 0
   const avgCTR = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : '0'
 
-  // Supply vs Demand split
-  const supplyCampaigns = campaigns.filter(c => c.campaign_name.toLowerCase().includes('partner') || c.campaign_name.toLowerCase().includes('rider') || c.campaign_name.toLowerCase().includes('driver') || c.campaign_name.toLowerCase().includes('3w') || c.campaign_name.toLowerCase().includes('supply'))
-  const demandCampaigns = campaigns.filter(c => !supplyCampaigns.includes(c))
+  // Supply vs Demand split — demand = has first orders, supply = no first orders
+  const supplyCampaigns = campaigns.filter(c => Number(c.first_orders) === 0)
+  const demandCampaigns = campaigns.filter(c => Number(c.first_orders) > 0)
   const supplySpend = supplyCampaigns.reduce((a, c) => a + Number(c.spend), 0)
   const demandSpend = demandCampaigns.reduce((a, c) => a + Number(c.spend), 0)
   const supplyInstalls = supplyCampaigns.reduce((a, c) => a + Number(c.installs), 0)
