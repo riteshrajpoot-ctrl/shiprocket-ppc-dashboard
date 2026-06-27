@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import Sidebar from '@/components/sidebar-nav'
+import MainWrapper from '@/components/main-wrapper'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -10,19 +11,13 @@ export const metadata: Metadata = {
   description: 'Performance Marketing Command Center',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={inter.className}>
         <div style={{ display: 'flex' }}>
           <Sidebar />
-          <main style={{ marginLeft: 220, flex: 1, minHeight: '100vh' }}>
-            {children}
-          </main>
+          <MainWrapper>{children}</MainWrapper>
         </div>
       </body>
     </html>
