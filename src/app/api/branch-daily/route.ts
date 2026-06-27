@@ -1,8 +1,39 @@
 import { NextResponse } from 'next/server'
 
+function chunkDateRange(start: string, end: string, chunkDays = 7) {
+  const chunks = []
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+  let current = new Date(startDate)
+  while (current <= endDate) {
+    const chunkEnd = new Date(current)
+    chunkEnd.setDate(chunkEnd.getDate() + chunkDays - 1)
+    if (chunkEnd > endDate) chunkEnd.setTime(endDate.getTime())
+    chunks.push({
+      start: current.toISOString().split('T')[0],
+      end: chunkEnd.toISOString().split('T')[0],
+    })
+    current = new Date(chunkEnd)
+    current.setDate(current.getDate() + 1)
+  }
+  return chunks
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-async function fetchDaily(branchKey: string, branchSecret: string, startDate: string, endDate: string, dataSource: string, filters: any): Promise<any[]> {
+// Generate all dates between start and end
+function generateDates(start: string, end: string): string[] {
+  const dates: string[] = []
+  const current = new Date(start)
+  const endDate = new Date(end)
+  while (current <= endDate) {
+    dates.push(current.toISOString().split('T')[0])
+    current.setDate(current.getDate() + 1)
+  }
+  return dates
+}
+
+async function fetchChunk(branchKey: string, branchSecret: string, startDate: string, endDate: string, dataSource: string, filters: any): Promise<any[]> {
   const body = {
     branch_key: branchKey,
     branch_secret: branchSecret,
@@ -10,7 +41,8 @@ async function fetchDaily(branchKey: string, branchSecret: string, startDate: st
     end_date: endDate,
     data_source: dataSource,
     aggregation: 'total_count',
-    dimensions: ['last_attributed_touch_data_tilde_advertising_partner_name'],
+    // No dimensions — just get total per day
+    dimensions: [],
     filters,
     granularity: 'day',
   }
@@ -28,12 +60,13 @@ async function fetchDaily(branchKey: string, branchSecret: string, startDate: st
       headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!retry.ok) throw new Error(`Branch error ${retry.status}: ${await retry.text()}`)
+    if (!retry.ok) return []
     return (await retry.json()).results || []
   }
 
-  if (!res.ok) throw new Error(`Branch error ${res.status}: ${await res.text()}`)
-  return (await res.json()).results || []
+  if (!res.ok) return []
+  const json = await res.json()
+  return json.results || []
 }
 
 export async function GET(request: Request) {
@@ -49,44 +82,45 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Fetch daily installs
-    const installResults = await fetchDaily(branchKey, branchSecret, startDate, endDate, 'eo_install', {})
-    await sleep(600)
-    // Fetch daily first orders
-    const orderResults = await fetchDaily(branchKey, branchSecret, startDate, endDate, 'eo_custom_event', { name: ['first_order_created_fe'] })
+    const chunks = chunkDateRange(startDate, endDate, 7)
+    const allDates = generateDates(startDate, endDate)
 
-    // Branch returns results with a `timestamp` field at top level when granularity=day
-    // Each result has: { result: { ...dimensions, total_count }, timestamp: '2026-06-01' }
+    // Pre-fill daily map with all dates = 0
     const dailyMap: Record<string, { date: string; installs: number; first_orders: number }> = {}
+    allDates.forEach(d => { dailyMap[d] = { date: d, installs: 0, first_orders: 0 } })
 
-    for (const r of installResults) {
-      // Try both possible date field locations
-      const date = r.timestamp?.split('T')[0] || r.result?.timestamp?.split('T')[0] || r.result?.date || ''
-      if (!date) continue
-      if (!dailyMap[date]) dailyMap[date] = { date, installs: 0, first_orders: 0 }
-      dailyMap[date].installs += r.result?.total_count || 0
+    // Fetch installs - granularity day with no dimensions gives one row per day
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(600)
+      const results = await fetchChunk(branchKey, branchSecret, chunks[i].start, chunks[i].end, 'eo_install', {})
+      for (const r of results) {
+        // With granularity=day, Branch puts the date in r.timestamp at the top level
+        const date = (r.timestamp || '').split('T')[0]
+        if (date && dailyMap[date]) {
+          dailyMap[date].installs += r.result?.total_count || 0
+        }
+      }
     }
 
-    for (const r of orderResults) {
-      const date = r.timestamp?.split('T')[0] || r.result?.timestamp?.split('T')[0] || r.result?.date || ''
-      if (!date) continue
-      if (!dailyMap[date]) dailyMap[date] = { date, installs: 0, first_orders: 0 }
-      dailyMap[date].first_orders += r.result?.total_count || 0
+    await sleep(600)
+
+    // Fetch first orders
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(600)
+      const results = await fetchChunk(branchKey, branchSecret, chunks[i].start, chunks[i].end, 'eo_custom_event', { name: ['first_order_created_fe'] })
+      for (const r of results) {
+        const date = (r.timestamp || '').split('T')[0]
+        if (date && dailyMap[date]) {
+          dailyMap[date].first_orders += r.result?.total_count || 0
+        }
+      }
     }
 
     const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date))
 
-    // Debug: also return raw sample so we can see structure if empty
-    const rawSample = installResults.slice(0, 2)
-
-    return NextResponse.json({
-      daily,
-      total: daily.length,
-      raw_sample: rawSample,
-      date_range: { start: startDate, end: endDate }
-    })
+    return NextResponse.json({ daily, date_range: { start: startDate, end: endDate } })
 
   } catch (err: any) {
-    return NextResponse.json({ error: 'Branch daily API error', message: err.message }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
