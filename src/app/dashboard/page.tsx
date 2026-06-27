@@ -493,15 +493,21 @@ export default function Dashboard() {
 
           {/* Partner filter tabs */}
           {(() => {
-            const tabs = ['All', 'Google', 'Facebook', 'Apple Search Ads', 'Other / Organic']
+            const tabs = ['All', 'Google', 'Facebook', 'Apple Search Ads', 'Affiliate', 'Organic']
 
             const filtered = (branchData?.by_campaign || []).filter((c: any) => {
               if (activePartner === 'All') return true
               const p = (c.ad_partner || '').toLowerCase()
-              if (activePartner === 'Google') return p.includes('google')
-              if (activePartner === 'Facebook') return p.includes('facebook') || p.includes('meta')
-              if (activePartner === 'Apple Search Ads') return p.includes('apple')
-              if (activePartner === 'Other / Organic') return !p.includes('google') && !p.includes('facebook') && !p.includes('meta') && !p.includes('apple')
+              const isGoogle = p.includes('google') || p.includes('adword')
+              const isFacebook = p.includes('facebook') || p.includes('meta')
+              const isApple = p.includes('apple')
+              const isOrganic = !c.ad_partner || c.ad_partner === '(organic)' || p === 'organic'
+              const isAffiliate = !isGoogle && !isFacebook && !isApple && !isOrganic
+              if (activePartner === 'Google') return isGoogle
+              if (activePartner === 'Facebook') return isFacebook
+              if (activePartner === 'Apple Search Ads') return isApple
+              if (activePartner === 'Affiliate') return isAffiliate
+              if (activePartner === 'Organic') return isOrganic
               return true
             })
 
@@ -538,14 +544,19 @@ export default function Dashboard() {
                         {filtered.slice(0, 20).map((c: any, i: number) => {
                           const cvr = c.installs > 0 ? ((c.orders / c.installs) * 100) : 0
                           const cvrDisplay = c.installs > 0 ? `${cvr.toFixed(1)}%` : '—*'
+                          const campLower = (c.campaign || '').toLowerCase()
+                          const isReengage = campLower.includes('_re_') || campLower.includes('reoc') || campLower.includes('retarget') || campLower.includes('re-engage') || campLower.includes('recharge') || campLower.includes('_re-') || campLower.match(/[_-]re[_-]/)
                           let flag = ''; let flagColor = ''
-                          if (c.installs === 0 && c.orders > 0) { flag = '0 installs anomaly'; flagColor = 'bg-orange-50 text-orange-700' }
-                          else if (cvr > 50) { flag = 'Install anomaly'; flagColor = 'bg-red-50 text-red-700' }
+                          const isOrganic = !c.ad_partner || c.ad_partner === '(organic)' || (c.ad_partner || '').toLowerCase() === 'organic'
+                          const isAffiliate = !isOrganic && !(c.ad_partner || '').toLowerCase().includes('google') && !(c.ad_partner || '').toLowerCase().includes('facebook') && !(c.ad_partner || '').toLowerCase().includes('apple')
+                          if (isReengage) { flag = 'Re-engage'; flagColor = 'bg-blue-50 text-blue-700' }
+                          else if (isOrganic) { flag = 'Organic'; flagColor = 'bg-slate-100 text-slate-500' }
+                          else if (isAffiliate && c.orders > 0 && c.installs === 0) { flag = '0 installs anomaly'; flagColor = 'bg-orange-50 text-orange-700' }
+                          else if (cvr > 500) { flag = 'Install anomaly'; flagColor = 'bg-red-50 text-red-700' }
+                          else if (c.installs > 500 && cvr >= 15) { flag = 'Scale this'; flagColor = 'bg-emerald-50 text-emerald-700' }
                           else if (cvr >= 20) { flag = 'Strong CVR'; flagColor = 'bg-emerald-50 text-emerald-700' }
                           else if (cvr >= 10) { flag = 'Good CVR'; flagColor = 'bg-blue-50 text-blue-700' }
-                          else if (c.installs > 500 && cvr >= 15) { flag = 'Scale this'; flagColor = 'bg-emerald-50 text-emerald-700' }
-                          else if (c.installs < 10 && c.orders > 100) { flag = 'Minimal installs'; flagColor = 'bg-amber-50 text-amber-700' }
-                          else if (!c.ad_partner || c.ad_partner === '(organic)') { flag = 'No attribution'; flagColor = 'bg-red-50 text-red-700' }
+                          else if (c.installs < 10 && c.orders > 50) { flag = 'Minimal installs'; flagColor = 'bg-amber-50 text-amber-700' }
                           const partnerColor = (p: string) => {
                             const pl = (p || '').toLowerCase()
                             if (pl.includes('google')) return 'text-blue-600'
