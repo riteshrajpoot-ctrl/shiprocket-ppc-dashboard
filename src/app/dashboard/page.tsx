@@ -485,6 +485,7 @@ export default function Dashboard() {
             <div>
               <span className="text-sm font-semibold text-slate-700">Campaign breakdown</span>
               <span className="text-xs text-slate-400 ml-2">Branch · all partners</span>
+              <span className="text-xs text-slate-400 ml-2">· {range.label}</span>
             </div>
             <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium">
               {branchData ? `${branchData.by_campaign?.length || 0} campaigns` : '—'}
