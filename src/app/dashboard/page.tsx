@@ -431,67 +431,50 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── SECTION 2: Trend chart + alerts ── */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div>
-                <span className="text-sm font-semibold text-slate-700">Performance trends</span>
-                <span className="text-xs text-slate-400 ml-2">{range.label}</span>
-                <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium ml-2">Branch · all channels</span>
-              </div>
-              <div className="flex gap-1.5">
-                {([
-                  { key: 'installs', label: 'Installs' },
-                  { key: 'first_orders', label: 'First orders' },
-                ] as const).map(({ key, label }) => (
-                  <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
+        {/* ── SECTION 2: Trend chart ── */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div>
+              <span className="text-sm font-semibold text-slate-700">Performance trends</span>
+              <span className="text-xs text-slate-400 ml-2">{range.label}</span>
+              <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium ml-2">Branch · all channels</span>
             </div>
-            <div style={{ position: 'relative', height: '180px' }}>
-              {branchDailyLoading ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading Branch data...</div> : branchDaily.length === 0 ? <div className="flex items-center justify-center h-full text-xs text-slate-400">No data available</div> : <canvas id="trendCanvas" />}
-            </div>
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-              <div className="flex gap-6">
-                {(() => {
-                  const vals = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
-                  const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
-                  const peak = vals.length ? Math.max(...vals) : 0
-                  const peakDate = branchDaily[vals.indexOf(peak)]?.date
-                  const low = vals.length ? Math.min(...vals) : 0
-                  const lowDate = branchDaily[vals.indexOf(low)]?.date
-                  const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
-                  return <>
-                    <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{avg.toLocaleString('en-IN')}</div></div>
-                    <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{peak.toLocaleString('en-IN')} ({fmt(peakDate)})</div></div>
-                    <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{low.toLocaleString('en-IN')} ({fmt(lowDate)})</div></div>
-                  </>
-                })()}
-              </div>
-              <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse ↗</button>
+            <div className="flex gap-1.5">
+              {([
+                { key: 'installs', label: 'Installs' },
+                { key: 'first_orders', label: 'First orders' },
+              ] as const).map(({ key, label }) => (
+                <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
-
-          {/* Alerts only */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Bell size={13} className="text-slate-400" />Alerts</span>
-              {criticalCount > 0 && <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">{criticalCount} critical</span>}
+          <div style={{ position: 'relative', height: '180px' }}>
+            {branchDailyLoading
+              ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading Branch data...</div>
+              : branchDaily.length === 0
+              ? <div className="flex items-center justify-center h-full text-xs text-slate-400">No data available — Branch daily data loading</div>
+              : <canvas id="trendCanvas" />}
+          </div>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+            <div className="flex gap-6">
+              {(() => {
+                const vals = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
+                const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
+                const peak = vals.length ? Math.max(...vals) : 0
+                const peakDate = branchDaily[vals.indexOf(peak)]?.date
+                const low = vals.length ? Math.min(...vals) : 0
+                const lowDate = branchDaily[vals.indexOf(low)]?.date
+                const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
+                return <>
+                  <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{avg.toLocaleString('en-IN')}</div></div>
+                  <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{peak.toLocaleString('en-IN')} ({fmt(peakDate)})</div></div>
+                  <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{low.toLocaleString('en-IN')} ({fmt(lowDate)})</div></div>
+                </>
+              })()}
             </div>
-            {loading ? <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}</div> :
-              alerts.length === 0 ? <div className="text-xs text-emerald-600 py-2 flex items-center gap-1.5"><CheckCircle size={12} />All campaigns healthy</div> :
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {alerts.map((a, i) => (
-                    <div key={i} className="flex gap-2 py-1.5 border-b border-slate-50 last:border-0">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-amber-400'}`} />
-                      <div><div className="text-xs text-slate-700 leading-snug">{a.msg}</div><div className="text-xs text-slate-400 mt-0.5">{a.time}</div></div>
-                    </div>
-                  ))}
-                </div>
-            }
+            <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse ↗</button>
           </div>
         </div>
       </div>
