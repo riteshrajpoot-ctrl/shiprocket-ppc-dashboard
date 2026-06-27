@@ -332,14 +332,6 @@ export default function Dashboard() {
   const demandCPO = demandOrders > 0 ? Math.round(demandSpend / demandOrders) : 0
   const supplyCTR = ((supplyCampaigns.reduce((a, c) => a + Number(c.clicks), 0) / Math.max(supplyCampaigns.reduce((a, c) => a + Number(c.impressions), 0), 1)) * 100).toFixed(2)
   const budgetPacing = totalSpend > 0 ? Math.round((totalSpend / 350000) * 100) : 0
-
-  const metricValues = daily.map(d => Number(d[activeMetric]))
-  const avgMetric = metricValues.length ? metricValues.reduce((a, b) => a + b, 0) / metricValues.length : 0
-  const peakIdx = metricValues.length ? metricValues.indexOf(Math.max(...metricValues)) : -1
-  const lowIdx = metricValues.length ? metricValues.indexOf(Math.min(...metricValues)) : -1
-  const fmtMetric = (v: number) => activeMetric === 'spend' ? fmtL(v) : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + Math.round(v) : Math.round(v).toLocaleString('en-IN')
-  const peakLabel = daily[peakIdx] ? `${fmtMetric(metricValues[peakIdx])} (${new Date(daily[peakIdx].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : '—'
-  const lowLabel = daily[lowIdx] ? `${fmtMetric(metricValues[lowIdx])} (${new Date(daily[lowIdx].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : '—'
   const criticalCount = alerts.filter(a => a.severity === 'critical').length
   const healthStatus = health >= 80 ? 'Good' : health >= 60 ? 'Needs attention' : 'Critical'
   const healthColor = health >= 80 ? '#1D9E75' : health >= 60 ? '#EF9F27' : '#E24B4A'
