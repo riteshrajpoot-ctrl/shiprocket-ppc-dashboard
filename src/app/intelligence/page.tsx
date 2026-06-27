@@ -1141,9 +1141,9 @@ export default function IntelligencePage() {
                   {/* Generated image */}
                   {generatedImages[i] && (
                     <div style={{ marginTop: 12 }}>
-                      <img src={`data:image/png;base64,${generatedImages[i]}`} alt="Generated ad" style={{ width: '100%', borderRadius: 8, border: '1px solid #E5E7EB' }} />
+                      <img src={generatedImages[i]} alt="Generated ad" style={{ width: '100%', borderRadius: 8, border: '1px solid #E5E7EB' }} />
                       <button onClick={() => {
-                        const a = document.createElement('a'); a.href = `data:image/png;base64,${generatedImages[i]}`; a.download = `ad-variant-${i+1}.png`; a.click()
+                        const a = document.createElement('a'); a.href = generatedImages[i]; a.download = `ad-variant-${i+1}.png`; a.click()
                       }} style={{ width: '100%', marginTop: 8, padding: '7px 0', borderRadius: 8, fontSize: 12, fontWeight: 500, border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#374151', cursor: 'pointer' }}>⬇ Download</button>
                     </div>
                   )}
