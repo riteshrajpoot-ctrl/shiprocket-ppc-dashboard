@@ -13,11 +13,12 @@ export async function GET(req: NextRequest) {
   try {
     // Fetch ad-level insights with creative fields
     const insightsUrl = new URL(`https://graph.facebook.com/v19.0/${META_ACCOUNT_ID}/insights`)
-    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions')
+    insightsUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,account_name,spend,impressions,clicks,ctr,cpc,actions,publisher_platform,platform_position')
     insightsUrl.searchParams.set('level', 'ad')
+    insightsUrl.searchParams.set('breakdowns', 'publisher_platform,platform_position')
     insightsUrl.searchParams.set('time_range[since]', dateStart)
     insightsUrl.searchParams.set('time_range[until]', dateEnd)
-    insightsUrl.searchParams.set('limit', '100')
+    insightsUrl.searchParams.set('limit', '200')
     insightsUrl.searchParams.set('access_token', token)
 
     const insightsRes = await fetch(insightsUrl.toString())
@@ -142,6 +143,26 @@ export async function GET(req: NextRequest) {
       } catch {}
     }
 
+    // Map real placement from Meta breakdown fields
+    const mapPlacement = (platform: string, position: string): string => {
+      const p = (platform || '').toLowerCase()
+      const pos = (position || '').toLowerCase()
+      if (p === 'instagram') {
+        if (pos.includes('reel')) return 'Instagram Reels'
+        if (pos.includes('story')) return 'Instagram Stories'
+        return 'Instagram Feed'
+      }
+      if (p === 'facebook') {
+        if (pos.includes('video') || pos.includes('instream')) return 'FB In-stream'
+        if (pos.includes('story')) return 'FB Stories'
+        if (pos.includes('reel')) return 'FB Reels'
+        return 'Facebook Feed'
+      }
+      if (p === 'audience_network') return 'Audience Network'
+      if (p === 'messenger') return 'Messenger'
+      return 'Facebook Feed'
+    }
+
     // Merge insights + creatives
     const ads = insightsData
       .filter((a: any) => Number(a.spend) > 0)
@@ -150,6 +171,7 @@ export async function GET(req: NextRequest) {
         const actions = a.actions || []
         const installs = Number(actions.find((x: any) => x.action_type === 'mobile_app_install')?.value ?? 0)
         const creative = creativeMap[a.ad_id] || {}
+        const placement = mapPlacement(a.publisher_platform || '', a.platform_position || '')
 
         return {
           ad_id: a.ad_id,
@@ -171,6 +193,9 @@ export async function GET(req: NextRequest) {
           preview_url: previewMap[a.ad_id] || '',
           ad_side: creative.ad_side || 'DEMAND',
           store_url: creative.store_url || '',
+          placement,
+          publisher_platform: a.publisher_platform || '',
+          platform_position: a.platform_position || '',
         }
       })
 
