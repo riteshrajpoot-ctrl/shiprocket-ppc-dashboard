@@ -265,6 +265,7 @@ export default function Dashboard() {
   // Branch daily for trend chart
   const [branchDaily, setBranchDaily] = useState<{ date: string; installs: number; first_orders: number }[]>([])
   const [branchDailyLoading, setBranchDailyLoading] = useState(true)
+  const [activePartner, setActivePartner] = useState('All')
 
   const fetchBranchDaily = useCallback(async (tag: string, cs?: string, ce?: string) => {
     setBranchDailyLoading(true)
@@ -489,78 +490,100 @@ export default function Dashboard() {
               {branchData ? `${branchData.by_campaign?.length || 0} campaigns` : '—'}
             </span>
           </div>
-          {branchLoading ? (
-            <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} />)}</div>
-          ) : !branchData?.by_campaign?.length ? (
-            <div className="text-xs text-slate-400 py-4 text-center">No campaign data available</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full" style={{ tableLayout: 'fixed', minWidth: '700px' }}>
-                <thead>
-                  <tr className="text-xs text-slate-400 border-b border-slate-100">
-                    <th className="text-left pb-2 font-medium w-2/5">Campaign</th>
-                    <th className="text-left pb-2 font-medium w-32">Partner</th>
-                    <th className="text-right pb-2 font-medium w-20">Installs</th>
-                    <th className="text-right pb-2 font-medium w-20">Orders</th>
-                    <th className="text-right pb-2 font-medium w-20">CVR</th>
-                    <th className="text-center pb-2 font-medium w-32">Flag</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {branchData.by_campaign.slice(0, 20).map((c: any, i: number) => {
-                    const cvr = c.installs > 0 ? ((c.orders / c.installs) * 100) : 0
-                    const cvrDisplay = c.installs > 0 ? `${cvr.toFixed(1)}%` : '—*'
 
-                    // Flag logic
-                    let flag = ''
-                    let flagColor = ''
-                    if (c.installs === 0 && c.orders > 0) { flag = '0 installs anomaly'; flagColor = 'bg-orange-50 text-orange-700' }
-                    else if (cvr > 50) { flag = 'Install anomaly'; flagColor = 'bg-red-50 text-red-700' }
-                    else if (cvr >= 20) { flag = 'Strong CVR'; flagColor = 'bg-emerald-50 text-emerald-700' }
-                    else if (cvr >= 10) { flag = 'Good CVR'; flagColor = 'bg-blue-50 text-blue-700' }
-                    else if (c.installs > 500 && cvr >= 15) { flag = 'Scale this'; flagColor = 'bg-emerald-50 text-emerald-700' }
-                    else if (c.installs < 10 && c.orders > 100) { flag = 'Minimal installs'; flagColor = 'bg-amber-50 text-amber-700' }
-                    else if (!c.ad_partner || c.ad_partner === '(organic)') { flag = 'No attribution'; flagColor = 'bg-red-50 text-red-700' }
+          {/* Partner filter tabs */}
+          {(() => {
+            const tabs = ['All', 'Google', 'Facebook', 'Apple Search Ads', 'Other / Organic']
 
-                    // Partner color
-                    const partnerColor = (p: string) => {
-                      const pl = (p || '').toLowerCase()
-                      if (pl.includes('google')) return 'text-blue-600'
-                      if (pl.includes('facebook') || pl.includes('meta')) return 'text-blue-500'
-                      if (pl.includes('apple')) return 'text-slate-600'
-                      if (pl.includes('organic') || p === '(organic)') return 'text-slate-400'
-                      return 'text-purple-600'
-                    }
+            const filtered = (branchData?.by_campaign || []).filter((c: any) => {
+              if (activePartner === 'All') return true
+              const p = (c.ad_partner || '').toLowerCase()
+              if (activePartner === 'Google') return p.includes('google')
+              if (activePartner === 'Facebook') return p.includes('facebook') || p.includes('meta')
+              if (activePartner === 'Apple Search Ads') return p.includes('apple')
+              if (activePartner === 'Other / Organic') return !p.includes('google') && !p.includes('facebook') && !p.includes('meta') && !p.includes('apple')
+              return true
+            })
 
-                    return (
-                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                        <td className="py-2.5 text-xs font-medium text-slate-800 truncate pr-2">{c.campaign || 'Not set'}</td>
-                        <td className={`py-2.5 text-xs font-medium truncate ${partnerColor(c.ad_partner)}`}>{c.ad_partner || 'Organic'}</td>
-                        <td className="py-2.5 text-right text-xs text-slate-700">{c.installs > 0 ? c.installs.toLocaleString('en-IN') : '—'}</td>
-                        <td className="py-2.5 text-right text-xs font-semibold text-emerald-600">{c.orders > 0 ? c.orders.toLocaleString('en-IN') : '—'}</td>
-                        <td className={`py-2.5 text-right text-xs font-medium ${cvr >= 20 ? 'text-emerald-600' : cvr >= 10 ? 'text-blue-600' : 'text-slate-500'}`}>{cvrDisplay}</td>
-                        <td className="py-2.5 text-center">
-                          {flag && <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${flagColor}`}>{flag}</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-slate-200">
-                    <td className="pt-2 text-xs font-semibold text-slate-700">Total</td>
-                    <td />
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{branchData.total_installs?.toLocaleString('en-IN')}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{branchData.total_orders?.toLocaleString('en-IN')}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">
-                      {branchData.total_installs > 0 ? `${((branchData.total_orders / branchData.total_installs) * 100).toFixed(1)}%` : '—'}
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+            return (
+              <>
+                <div className="flex gap-1 border-b border-slate-100 mb-3">
+                  {tabs.map(tab => (
+                    <button key={tab} onClick={() => setActivePartner(tab)}
+                      className={`text-xs px-3 py-2 border-b-2 cursor-pointer transition-colors ${activePartner === tab ? 'border-blue-600 text-blue-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                      style={{ background: 'none', outline: 'none' }}>
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {branchLoading ? (
+                  <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} />)}</div>
+                ) : !filtered.length ? (
+                  <div className="text-xs text-slate-400 py-4 text-center">No campaigns for this partner</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full" style={{ tableLayout: 'fixed', minWidth: '700px' }}>
+                      <thead>
+                        <tr className="text-xs text-slate-400 border-b border-slate-100">
+                          <th className="text-left pb-2 font-medium w-2/5">Campaign</th>
+                          <th className="text-left pb-2 font-medium w-32">Partner</th>
+                          <th className="text-right pb-2 font-medium w-20">Installs</th>
+                          <th className="text-right pb-2 font-medium w-20">Orders</th>
+                          <th className="text-right pb-2 font-medium w-20">CVR</th>
+                          <th className="text-center pb-2 font-medium w-32">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.slice(0, 20).map((c: any, i: number) => {
+                          const cvr = c.installs > 0 ? ((c.orders / c.installs) * 100) : 0
+                          const cvrDisplay = c.installs > 0 ? `${cvr.toFixed(1)}%` : '—*'
+                          let flag = ''; let flagColor = ''
+                          if (c.installs === 0 && c.orders > 0) { flag = '0 installs anomaly'; flagColor = 'bg-orange-50 text-orange-700' }
+                          else if (cvr > 50) { flag = 'Install anomaly'; flagColor = 'bg-red-50 text-red-700' }
+                          else if (cvr >= 20) { flag = 'Strong CVR'; flagColor = 'bg-emerald-50 text-emerald-700' }
+                          else if (cvr >= 10) { flag = 'Good CVR'; flagColor = 'bg-blue-50 text-blue-700' }
+                          else if (c.installs > 500 && cvr >= 15) { flag = 'Scale this'; flagColor = 'bg-emerald-50 text-emerald-700' }
+                          else if (c.installs < 10 && c.orders > 100) { flag = 'Minimal installs'; flagColor = 'bg-amber-50 text-amber-700' }
+                          else if (!c.ad_partner || c.ad_partner === '(organic)') { flag = 'No attribution'; flagColor = 'bg-red-50 text-red-700' }
+                          const partnerColor = (p: string) => {
+                            const pl = (p || '').toLowerCase()
+                            if (pl.includes('google')) return 'text-blue-600'
+                            if (pl.includes('facebook') || pl.includes('meta')) return 'text-blue-500'
+                            if (pl.includes('apple')) return 'text-slate-600'
+                            if (pl.includes('organic') || p === '(organic)') return 'text-slate-400'
+                            return 'text-purple-600'
+                          }
+                          return (
+                            <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                              <td className="py-2.5 text-xs font-medium text-slate-800 truncate pr-2">{c.campaign || 'Not set'}</td>
+                              <td className={`py-2.5 text-xs font-medium truncate ${partnerColor(c.ad_partner)}`}>{c.ad_partner || 'Organic'}</td>
+                              <td className="py-2.5 text-right text-xs text-slate-700">{c.installs > 0 ? c.installs.toLocaleString('en-IN') : '—'}</td>
+                              <td className="py-2.5 text-right text-xs font-semibold text-emerald-600">{c.orders > 0 ? c.orders.toLocaleString('en-IN') : '—'}</td>
+                              <td className={`py-2.5 text-right text-xs font-medium ${cvr >= 20 ? 'text-emerald-600' : cvr >= 10 ? 'text-blue-600' : 'text-slate-500'}`}>{cvrDisplay}</td>
+                              <td className="py-2.5 text-center">{flag && <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${flagColor}`}>{flag}</span>}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-slate-200">
+                          <td className="pt-2 text-xs font-semibold text-slate-700">Total</td>
+                          <td />
+                          <td className="pt-2 text-right text-xs font-semibold text-slate-700">{filtered.reduce((a: number, c: any) => a + c.installs, 0).toLocaleString('en-IN')}</td>
+                          <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{filtered.reduce((a: number, c: any) => a + c.orders, 0).toLocaleString('en-IN')}</td>
+                          <td className="pt-2 text-right text-xs font-semibold text-slate-700">
+                            {(() => { const ti = filtered.reduce((a: number, c: any) => a + c.installs, 0); const to = filtered.reduce((a: number, c: any) => a + c.orders, 0); return ti > 0 ? `${((to / ti) * 100).toFixed(1)}%` : '—' })()}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
     </div>
