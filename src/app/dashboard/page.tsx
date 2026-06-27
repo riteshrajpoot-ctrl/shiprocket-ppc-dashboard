@@ -232,6 +232,10 @@ export default function Dashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [showSidekick, setShowSidekick] = useState(false); const [showOptimizer, setShowOptimizer] = useState(false)
 
+  // Branch state
+  const [branchData, setBranchData] = useState<{ total_orders: number; total_installs: number; by_partner: { partner: string; installs: number; orders: number }[] } | null>(null)
+  const [branchLoading, setBranchLoading] = useState(true)
+
   const range = getDateRange(activeRangeTag, customStart, customEnd)
 
   const fetchMetrics = useCallback(async (tag: string, cs?: string, ce?: string) => {
@@ -246,7 +250,22 @@ export default function Dashboard() {
     finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { fetchMetrics(activeRangeTag, customStart, customEnd) }, [activeRangeTag, customStart, customEnd, fetchMetrics])
+  const fetchBranch = useCallback(async (tag: string, cs?: string, ce?: string) => {
+    setBranchLoading(true)
+    try {
+      const r = getDateRange(tag, cs, ce)
+      const res = await fetch(`/api/branch-metrics?start_date=${r.start}&end_date=${r.end}`)
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error) setBranchData(json)
+    } catch {}
+    finally { setBranchLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    fetchMetrics(activeRangeTag, customStart, customEnd)
+    fetchBranch(activeRangeTag, customStart, customEnd)
+  }, [activeRangeTag, customStart, customEnd, fetchMetrics, fetchBranch])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -369,14 +388,14 @@ export default function Dashboard() {
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Channel overview</div>
           <div className="grid grid-cols-4 gap-3">
 
-            {/* Meta Ads — show ad spend + installs + CPI + CTR */}
+            {/* Meta Ads — supply CPI + demand CPI separately */}
             <ChannelCard
               icon="M" name="Meta Ads" status="live" color="bg-blue-600"
               metrics={[
-                { label: 'Spend MTD', value: loading ? null : fmtL(totalSpend) },
-                { label: 'Installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
-                { label: 'Avg CPI', value: loading ? null : avgCPI > 0 ? `₹${avgCPI}` : '—', color: avgCPI <= 20 ? 'text-emerald-600' : avgCPI <= 50 ? 'text-amber-600' : 'text-red-500' },
-                { label: 'Avg CTR', value: loading ? null : `${avgCTR}%`, color: Number(avgCTR) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
+                { label: 'Total spend MTD', value: loading ? null : fmtL(totalSpend) },
+                { label: 'Supply CPI', value: loading ? null : supplyCPI > 0 ? `₹${supplyCPI}` : '—', color: supplyCPI <= 20 ? 'text-emerald-600' : supplyCPI <= 50 ? 'text-amber-600' : 'text-red-500' },
+                { label: 'Demand installs', value: loading ? null : demandInstalls > 0 ? demandInstalls.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
+                { label: 'Supply installs', value: loading ? null : supplyInstalls > 0 ? supplyInstalls.toLocaleString('en-IN') : '—', color: 'text-purple-600' },
               ]}
               budgetUsed={budgetPacing}
               onClick={() => window.location.href = '/growth-overview'}
@@ -385,14 +404,14 @@ export default function Dashboard() {
             {/* Google Ads — coming soon */}
             <ChannelCard icon="G" name="Google Ads" status="soon" color="bg-red-500" />
 
-            {/* Branch — attribution layer, show first orders + conversion rate only */}
+            {/* Branch — real Branch API data, all channels */}
             <ChannelCard
               icon="B" name="Branch" status="beta" color="bg-purple-600"
               metrics={[
-                { label: 'First orders', value: loading ? null : totalFirstOrders > 0 ? totalFirstOrders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
-                { label: 'Install → order %', value: loading ? null : totalInstalls > 0 && totalFirstOrders > 0 ? `${((totalFirstOrders / totalInstalls) * 100).toFixed(1)}%` : '—' },
-                { label: 'Daily avg orders', value: loading ? null : totalFirstOrders > 0 ? `${Math.round(totalFirstOrders / Math.max(new Date().getDate(), 1))}` : '—', color: 'text-slate-600' },
-                { label: 'Conversion quality', value: loading ? null : totalFirstOrders > 0 && totalInstalls > 0 ? ((totalFirstOrders / totalInstalls) * 100) >= 1 ? 'Good' : ((totalFirstOrders / totalInstalls) * 100) >= 0.5 ? 'Watch' : 'Low' : '—', color: totalInstalls > 0 && ((totalFirstOrders / totalInstalls) * 100) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
+                { label: 'Total installs', value: branchLoading ? null : branchData ? branchData.total_installs.toLocaleString('en-IN') : '—', color: 'text-emerald-600' },
+                { label: 'First orders', value: branchLoading ? null : branchData ? branchData.total_orders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
+                { label: 'Install → order %', value: branchLoading ? null : branchData && branchData.total_installs > 0 ? `${((branchData.total_orders / branchData.total_installs) * 100).toFixed(1)}%` : '—' },
+                { label: 'Daily avg orders', value: branchLoading ? null : branchData ? `${Math.round(branchData.total_orders / Math.max(new Date().getDate(), 1))}` : '—' },
               ]}
               onClick={() => window.location.href = '/branch'}
             />
