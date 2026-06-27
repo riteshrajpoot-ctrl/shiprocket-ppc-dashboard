@@ -269,7 +269,7 @@ export default function IntelligencePage() {
 
   // ── Playbook state ───────────────────────────────────────────────────────────
   const [pbCells, setPbCells] = useState<any[]>([])
-  const [pbInsights, setPbInsights] = useState<any[]>([])
+  const [pbCellInsights, setPbCellInsights] = useState<Record<string, any[]>>({})
   const [pbLoading, setPbLoading] = useState(false)
   const [pbAnalysing, setPbAnalysing] = useState(false)
   const [pbSelectedCell, setPbSelectedCell] = useState<string | null>(null)
@@ -290,7 +290,7 @@ export default function IntelligencePage() {
     }
     setPbLoading(true)
     setPbCells([])
-    setPbInsights([])
+    setPbCellInsights({})
     setPbAds([])
 
     const inferPlacementLocal = (ad: AdReport): string => {
@@ -298,7 +298,6 @@ export default function IntelligencePage() {
       if (cn.includes('reel')) return 'Instagram Reels'
       if (cn.includes('instagram') || cn.includes(' ig ') || cn.startsWith('ig_')) return 'Instagram Feed'
       if (cn.includes('instream') || cn.includes('in-stream')) return 'FB In-stream'
-      if (cn.includes('story') || cn.includes('stories')) return 'Stories'
       return 'Facebook Feed'
     }
 
@@ -312,19 +311,21 @@ export default function IntelligencePage() {
       ...ad,
       _placement: inferPlacementLocal(ad),
       _audience: inferAudienceLocal(ad),
+      _side: ad.ad_side === 'SUPPLY' ? 'Supply' : 'Demand',
       _dims: null,
     }))
 
     const map: Record<string, any[]> = {}
     enriched.forEach(ad => {
-      const k = `${ad._placement}|${ad._audience}`
+      const k = `${ad._placement}|${ad._audience}|${ad._side}`
       if (!map[k]) map[k] = []
       map[k].push(ad)
     })
 
     const cells = Object.entries(map).map(([k, grpAds]) => {
-      const [placement, audience] = k.split('|')
-      return { key: k, label: `${placement} · ${audience}`, ads: grpAds }
+      const [placement, audience, side] = k.split('|')
+      const sideColor = side === 'Supply' ? '#7C3AED' : '#0891B2'
+      return { key: k, label: `${placement} · ${audience}`, side, sideColor, ads: grpAds }
     }).sort((a, b) => b.ads.length - a.ads.length)
 
     setPbAds(enriched)
@@ -369,7 +370,7 @@ export default function IntelligencePage() {
         insights.push({ dimension: label, value: val, avg_ctr: Math.round(gAvgCtr * 100) / 100, avg_cpi: Math.round(gAvgCpi), ad_count: grpAds.length, score: Math.round(score * 100), direction: score > 0.15 ? 'USE' : score < -0.15 ? 'AVOID' : 'TEST' })
       })
     })
-    setPbInsights(insights.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)))
+    setPbCellInsights(prev => ({ ...prev, [cell.key]: insights.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)) }))
     setPbAnalysing(false)
   }
 
@@ -1214,75 +1215,88 @@ export default function IntelligencePage() {
                 </div>
 
                 {pbCells.map(cell => {
-                  const isSelected = pbSelectedCell === cell.key
-                  const isAnalysing = pbAnalysing && isSelected
+                  const isAnalysing = pbAnalysing && pbSelectedCell === cell.key
+                  const cellInsights = pbCellInsights[cell.key] || []
+                  const hasInsights = cellInsights.length > 0
                   return (
                     <div key={cell.key} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, padding: '16px 20px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: 14, color: '#111827' }}>{cell.label}</p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: '#111827' }}>{cell.label}</p>
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: cell.side === 'Supply' ? '#F5F3FF' : '#E0F2FE', color: cell.sideColor }}>{cell.side}</span>
+                          </div>
                           <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>{cell.ads.length} ads</p>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           {isAnalysing && <span style={{ fontSize: 12, color: '#6B7280' }}>Analysing… {pbProgress}%</span>}
-                          {isSelected && !isAnalysing && pbInsights.length > 0 && <span style={{ fontSize: 12, color: '#059669', fontWeight: 500 }}>✓ {pbInsights.length} insights</span>}
+                          {hasInsights && !isAnalysing && <span style={{ fontSize: 12, color: '#059669', fontWeight: 500 }}>✓ {cellInsights.length} insights</span>}
                           <button onClick={() => analysePlaybookCell(cell)} disabled={pbAnalysing} style={{
                             padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
                             border: '1.5px solid #6366F1', background: '#EEF2FF', color: '#4F46E5',
                             cursor: pbAnalysing ? 'not-allowed' : 'pointer'
-                          }}>{isSelected && pbInsights.length > 0 ? 'Re-analyse' : 'Analyse →'}</button>
+                          }}>{hasInsights ? 'Re-analyse' : 'Analyse →'}</button>
                         </div>
                       </div>
 
-                      {/* Insights table */}
-                      {isSelected && !isAnalysing && (
+                      {/* Insights table — always visible once analysed */}
+                      {hasInsights && !isAnalysing && (
                         <div style={{ marginTop: 16, borderTop: '1px solid #F3F4F6', paddingTop: 16 }}>
-                          {pbInsights.length === 0 ? (
-                            <p style={{ fontSize: 13, color: '#9CA3AF', margin: 0 }}>Not enough data — need 5+ ads per dimension value to surface a validated insight.</p>
-                          ) : (
-                            <>
-                              <p style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px' }}>Creative playbook · {cell.label}</p>
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                                <thead>
-                                  <tr style={{ borderBottom: '1px solid #F3F4F6', background: '#F9FAFB' }}>
-                                    {['Dimension', 'Value', 'Avg CTR', 'Avg CPI', 'Ads', 'Direction'].map(h => (
-                                      <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Direction' ? 'center' : 'left', fontWeight: 600, fontSize: 11, color: '#6B7280', textTransform: 'uppercase' }}>{h}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {pbInsights.map((ins: any, i: number) => (
-                                    <tr key={i} style={{ borderBottom: '1px solid #F9FAFB' }}>
-                                      <td style={{ padding: '10px 12px', color: '#6B7280' }}>{ins.dimension}</td>
-                                      <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>{ins.value}</td>
-                                      <td style={{ padding: '10px 12px' }}>{ins.avg_ctr}%</td>
-                                      <td style={{ padding: '10px 12px' }}>{ins.avg_cpi > 0 ? `₹${ins.avg_cpi}` : '—'}</td>
-                                      <td style={{ padding: '10px 12px', color: '#9CA3AF' }}>{ins.ad_count}</td>
-                                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                        <span style={{
-                                          display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
-                                          background: ins.direction === 'USE' ? '#ECFDF5' : ins.direction === 'AVOID' ? '#FEF2F2' : '#FFFBEB',
-                                          color: ins.direction === 'USE' ? '#059669' : ins.direction === 'AVOID' ? '#DC2626' : '#D97706',
-                                        }}>{ins.direction}</span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              <div style={{ marginTop: 16 }}>
-                                <button onClick={() => {
-                                  const use = pbInsights.filter((i: any) => i.direction === 'USE')
-                                  if (use.length) {
-                                    setOffer(`Validated creative choices to use: ${use.map((i: any) => `${i.dimension}: ${i.value}`).join(', ')}`)
-                                    setActiveTab('creative')
-                                  }
-                                }} style={{
-                                  padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                                  background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer'
-                                }}>✨ Generate brief from insights →</button>
-                              </div>
-                            </>
-                          )}
+                          <p style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px' }}>Creative playbook · {cell.label} · {cell.side}</p>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid #F3F4F6', background: '#F9FAFB' }}>
+                                {['Dimension', 'Value', 'Avg CTR', 'Avg CPI', 'Ads', 'Direction'].map(h => (
+                                  <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Direction' ? 'center' : 'left', fontWeight: 600, fontSize: 11, color: '#6B7280', textTransform: 'uppercase' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cellInsights.map((ins: any, i: number) => (
+                                <tr key={i} style={{ borderBottom: '1px solid #F9FAFB' }}>
+                                  <td style={{ padding: '10px 12px', color: '#6B7280' }}>{ins.dimension}</td>
+                                  <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>{ins.value}</td>
+                                  <td style={{ padding: '10px 12px' }}>{ins.avg_ctr}%</td>
+                                  <td style={{ padding: '10px 12px' }}>{ins.avg_cpi > 0 ? `₹${ins.avg_cpi}` : '—'}</td>
+                                  <td style={{ padding: '10px 12px', color: '#9CA3AF' }}>{ins.ad_count}</td>
+                                  <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                    <span style={{
+                                      display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
+                                      background: ins.direction === 'USE' ? '#ECFDF5' : ins.direction === 'AVOID' ? '#FEF2F2' : '#FFFBEB',
+                                      color: ins.direction === 'USE' ? '#059669' : ins.direction === 'AVOID' ? '#DC2626' : '#D97706',
+                                    }}>{ins.direction}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+
+                          {/* Action buttons */}
+                          <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
+                            <button onClick={() => {
+                              const use = cellInsights.filter((i: any) => i.direction === 'USE')
+                              if (use.length) {
+                                setOffer(`Validated creative choices to use: ${use.map((i: any) => `${i.dimension}: ${i.value}`).join(', ')}`)
+                                setActiveTab('creative')
+                              }
+                            }} style={{ padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600, background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                              ✨ Generate brief →
+                            </button>
+                            <button onClick={() => {
+                              const use = cellInsights.filter((i: any) => i.direction === 'USE')
+                              if (use.length) {
+                                const hookIns = cellInsights.find((i: any) => i.dimension === 'Hook strategy' && i.direction === 'USE')
+                                const toneIns = cellInsights.find((i: any) => i.dimension === 'Script tone' && i.direction === 'USE')
+                                const incIns = cellInsights.find((i: any) => i.dimension === 'Financial incentive' && i.direction === 'USE')
+                                setStudioHook(hookIns ? `${hookIns.value} hook — [your headline here]` : '')
+                                setStudioBody(toneIns ? `Tone: ${toneIns.value}. ${incIns ? `Incentive: ${incIns.value}.` : ''}` : '')
+                                setStudioCta('Abhi Join Karo')
+                                setActiveTab('studio')
+                              }
+                            }} style={{ padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: '1.5px solid #6366F1', background: '#EEF2FF', color: '#4F46E5', cursor: 'pointer' }}>
+                              🎨 Use in Ad Studio →
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
