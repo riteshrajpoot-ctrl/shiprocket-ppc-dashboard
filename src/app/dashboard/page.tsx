@@ -233,7 +233,7 @@ export default function Dashboard() {
   const [showSidekick, setShowSidekick] = useState(false); const [showOptimizer, setShowOptimizer] = useState(false)
 
   // Branch state
-  const [branchData, setBranchData] = useState<{ total_orders: number; total_installs: number; by_partner: { partner: string; installs: number; orders: number }[] } | null>(null)
+  const [branchData, setBranchData] = useState<{ total_orders: number; total_installs: number; by_partner: { partner: string; installs: number; orders: number }[]; by_campaign: { campaign: string; ad_partner: string; installs: number; orders: number }[] } | null>(null)
   const [branchLoading, setBranchLoading] = useState(true)
 
   const range = getDateRange(activeRangeTag, customStart, customEnd)
