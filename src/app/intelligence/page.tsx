@@ -285,30 +285,52 @@ export default function IntelligencePage() {
     return 'Broad'
   }
 
-  const loadPlaybook = async () => {
-    setPbLoading(true); setPbCells([]); setPbInsights([]); setPbAds([])
-    try {
-      const res = await fetch(`/api/ad-level-report?date_start=${dateStart}&date_end=${dateEnd}&placement=true`)
-      const data = await res.json()
-      // Use real placement from API, fall back to name-based inference only if missing
-      const enriched = (data.ads || []).map((ad: any) => ({
-        ...ad,
-        _placement: ad.placement || 'Facebook Feed',
-        _audience: inferAudience(ad),
-        _dims: null,
-      }))
-      setPbAds(enriched)
-      const map: Record<string, any[]> = {}
-      enriched.forEach((ad: any) => {
-        const k = `${ad._placement}|${ad._audience}`
-        if (!map[k]) map[k] = []
-        map[k].push(ad)
-      })
-      setPbCells(Object.entries(map).map(([k, ads]) => {
-        const [placement, audience] = k.split('|')
-        return { key: k, label: `${placement} · ${audience}`, ads }
-      }).sort((a, b) => b.ads.length - a.ads.length))
-    } catch (e: any) { alert(e.message) }
+  const loadPlaybook = () => {
+    if (ads.length === 0) {
+      alert('Your ads haven\'t loaded yet. Please wait for the Creative Analysis tab to finish loading, then try again.')
+      return
+    }
+    setPbLoading(true)
+    setPbCells([])
+    setPbInsights([])
+    setPbAds([])
+
+    const inferPlacementLocal = (ad: AdReport): string => {
+      const cn = (ad.campaign_name + ' ' + (ad.adset_name || '')).toLowerCase()
+      if (cn.includes('reel')) return 'Instagram Reels'
+      if (cn.includes('instagram') || cn.includes(' ig ') || cn.startsWith('ig_')) return 'Instagram Feed'
+      if (cn.includes('instream') || cn.includes('in-stream')) return 'FB In-stream'
+      if (cn.includes('story') || cn.includes('stories')) return 'Stories'
+      return 'Facebook Feed'
+    }
+
+    const inferAudienceLocal = (ad: AdReport): string => {
+      const cn = (ad.campaign_name + ' ' + (ad.adset_name || '')).toLowerCase()
+      if (cn.includes('custom') || cn.includes('lookalike') || cn.includes('_lal') || cn.includes('retarget')) return 'Custom/LAL'
+      return 'Broad'
+    }
+
+    const enriched = ads.map(ad => ({
+      ...ad,
+      _placement: inferPlacementLocal(ad),
+      _audience: inferAudienceLocal(ad),
+      _dims: null,
+    }))
+
+    const map: Record<string, any[]> = {}
+    enriched.forEach(ad => {
+      const k = `${ad._placement}|${ad._audience}`
+      if (!map[k]) map[k] = []
+      map[k].push(ad)
+    })
+
+    const cells = Object.entries(map).map(([k, grpAds]) => {
+      const [placement, audience] = k.split('|')
+      return { key: k, label: `${placement} · ${audience}`, ads: grpAds }
+    }).sort((a, b) => b.ads.length - a.ads.length)
+
+    setPbAds(enriched)
+    setPbCells(cells)
     setPbLoading(false)
   }
 
@@ -817,7 +839,12 @@ export default function IntelligencePage() {
             { id: 'competitor', label: '👁 Competitor analysis' },
             { id: 'creative', label: '✍️ Script to creative' },
           ].map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id as Tab)} style={{
+            <button key={t.id} onClick={() => {
+              setActiveTab(t.id as Tab)
+              if (t.id === 'playbook' && pbCells.length === 0) {
+                loadPlaybook()
+              }
+            }} style={{
               padding: '6px 16px', borderRadius: 6, fontSize: 13, fontWeight: 500,
               border: activeTab === t.id ? '1.5px solid #6366F1' : '1px solid #E5E7EB',
               background: activeTab === t.id ? '#EEF2FF' : '#fff',
@@ -1058,12 +1085,18 @@ export default function IntelligencePage() {
                 <div style={{ fontSize: 36, marginBottom: 12 }}>🧠</div>
                 <p style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: '0 0 8px' }}>Creative playbook</p>
                 <p style={{ fontSize: 13, color: '#6B7280', maxWidth: 480, margin: '0 auto 20px' }}>
-                  Pulls your ads, groups them by placement + audience, then Claude extracts creative dimensions and scores which choices drive better CTR and lower CPI.
+                  Groups your ads by placement + audience, then scores which creative choices drive better CTR and lower CPI.
+                  {ads.length === 0 && <><br /><br /><span style={{ color: '#DC2626', fontWeight: 500 }}>⚠️ Go to Creative Analysis tab first — your ads need to load before the playbook can group them.</span></>}
                 </p>
-                <button onClick={loadPlaybook} disabled={pbLoading} style={{
-                  padding: '10px 24px', borderRadius: 8, background: pbLoading ? '#E5E7EB' : 'linear-gradient(135deg,#6366F1,#8B5CF6)',
-                  color: pbLoading ? '#9CA3AF' : '#fff', border: 'none', fontSize: 14, fontWeight: 600, cursor: pbLoading ? 'not-allowed' : 'pointer'
-                }}>{pbLoading ? '⏳ Loading ads…' : '🚀 Load & group my ads'}</button>
+                <button onClick={loadPlaybook} disabled={pbLoading || ads.length === 0} style={{
+                  padding: '10px 24px', borderRadius: 8,
+                  background: ads.length === 0 ? '#E5E7EB' : pbLoading ? '#E5E7EB' : 'linear-gradient(135deg,#6366F1,#8B5CF6)',
+                  color: ads.length === 0 ? '#9CA3AF' : pbLoading ? '#9CA3AF' : '#fff',
+                  border: 'none', fontSize: 14, fontWeight: 600,
+                  cursor: pbLoading || ads.length === 0 ? 'not-allowed' : 'pointer'
+                }}>
+                  {pbLoading ? '⏳ Grouping…' : ads.length === 0 ? 'Load ads first →' : `🚀 Group my ${ads.length} ads`}
+                </button>
               </div>
             )}
 
