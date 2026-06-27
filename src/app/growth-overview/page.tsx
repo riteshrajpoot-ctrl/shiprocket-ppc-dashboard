@@ -555,7 +555,14 @@ export default function GrowthOverviewPage() {
               const allCampaigns = [
                 ...(data.supply.topCampaigns || []).map(c => ({ ...c, side: 'supply' as const })),
                 ...(data.demand.topCampaigns || []).map(c => ({ ...c, side: 'demand' as const })),
-              ]
+              ].map(c => {
+                // Override side based on campaign name if misclassified
+                const n = c.name.toLowerCase()
+                const looksSupply = n.includes('partner') || n.includes('rider') || n.includes('driver') || n.includes('_3w') || n.includes('3w_') || n.includes('leads_wa') || n.includes('d_partner') || n.includes('heavy') || n.includes('geo')
+                const looksDemand = n.includes('acl') || n.includes('ocfe') || n.includes('netcore') || n.includes('lookalike') || n.includes('test_13') || n.includes('brand_inf')
+                if (looksSupply && c.side === 'demand' && c.orders === 0) return { ...c, side: 'supply' as const }
+                return c
+              })
 
               const filtered = tableTab === 'all' ? allCampaigns : allCampaigns.filter(c => c.side === tableTab)
               const sorted = [...filtered].sort((a, b) => {
@@ -633,8 +640,9 @@ export default function GrowthOverviewPage() {
                           const cpo = Number(c.cpo || 0)
                           const target = isSupply ? SUPPLY_CPI_TARGET : DEMAND_CPO_TARGET
                           const val = isSupply ? cpi : cpo
+                          // Only show bar when we have a meaningful value
                           const barPct = val > 0 ? Math.min((val / target) * 100, 100) : 0
-                          const barColor = val <= target * 0.75 ? '#059669' : val <= target ? '#D97706' : '#DC2626'
+                          const barColor = val > 0 ? (val <= target * 0.75 ? '#059669' : val <= target ? '#D97706' : '#DC2626') : '#E5E7EB'
                           const flag = getFlag(c)
                           return (
                             <tr key={i} style={{ borderBottom: '.5px solid #F9FAFB' }}
