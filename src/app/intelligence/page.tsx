@@ -195,7 +195,6 @@ export default function IntelligencePage() {
   }
 
   const generateImageBrief = async (idx: number, v: ScriptVariant) => {
-    if (!modalAd || !modalAnalysis) return
     setGeneratingBrief(idx)
     setExpandedBrief(idx)
     try {
@@ -204,9 +203,9 @@ export default function IntelligencePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           variant: v,
-          adName: modalAd.ad_name,
-          campaignContext: modalAd.campaign_name,
-          issues: modalAnalysis.improvements.join('. ')
+          adName: modalAd?.ad_name || 'Shiprocket Quick',
+          campaignContext: modalAd?.campaign_name || objective,
+          issues: modalAnalysis?.improvements.join('. ') || '',
         }),
       })
       const data = await res.json()
@@ -221,19 +220,18 @@ export default function IntelligencePage() {
   }
 
   const generateAdImage = async (idx: number, v: ScriptVariant) => {
-    if (!modalAd || !modalAnalysis) return
     setGeneratingImage(idx)
-    const adSide = detectAdSide(modalAd)
+    const adSide = modalAd ? detectAdSide(modalAd) : 'SUPPLY'
     try {
       const res = await fetch('/api/generate-ad-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           variant: v,
-          adName: modalAd.ad_name,
-          campaignContext: modalAd.campaign_name,
-          issues: modalAnalysis.improvements.join('. '),
-          referenceImageUrl: modalAd.thumbnail_url || null,
+          adName: modalAd?.ad_name || 'Shiprocket Quick',
+          campaignContext: modalAd?.campaign_name || objective,
+          issues: modalAnalysis?.improvements.join('. ') || '',
+          referenceImageUrl: modalAd?.thumbnail_url || null,
           adSide,
         }),
       })
