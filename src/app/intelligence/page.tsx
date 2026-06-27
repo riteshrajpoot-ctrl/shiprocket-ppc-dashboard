@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 
-type Tab = 'analyze' | 'competitor' | 'creative' | 'playbook'
+type Tab = 'analyze' | 'competitor' | 'creative' | 'playbook' | 'studio'
 
 interface AdReport {
   ad_id: string
@@ -373,6 +373,59 @@ export default function IntelligencePage() {
     })
     setPbInsights(insights.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)))
     setPbAnalysing(false)
+  }
+
+  // ── Ad Studio ────────────────────────────────────────────────────────────────
+  const [studioCharacter, setStudioCharacter] = useState<string | null>(null)
+  const [studioBackground, setStudioBackground] = useState<string | null>(null)
+  const [studioLogo, setStudioLogo] = useState<string | null>(null)
+  const [studioCharacterName, setStudioCharacterName] = useState('')
+  const [studioBackgroundName, setStudioBackgroundName] = useState('')
+  const [studioLogoName, setStudioLogoName] = useState('')
+  const [studioHook, setStudioHook] = useState('')
+  const [studioBody, setStudioBody] = useState('')
+  const [studioCta, setStudioCta] = useState('')
+  const [studioFormat, setStudioFormat] = useState<'1:1' | '9:16' | 'both'>('both')
+  const [studioGenerating, setStudioGenerating] = useState(false)
+  const [studioResults, setStudioResults] = useState<{ square?: string; vertical?: string }>({})
+  const [studioError, setStudioError] = useState('')
+  const charRef = useRef<HTMLInputElement>(null)
+  const bgRef = useRef<HTMLInputElement>(null)
+  const logoRef = useRef<HTMLInputElement>(null)
+
+  const handleStudioUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'character' | 'background' | 'logo') => {
+    const file = e.target.files?.[0]; if (!file) return
+    const b64 = await toBase64(file)
+    if (type === 'character') { setStudioCharacter(b64); setStudioCharacterName(file.name) }
+    if (type === 'background') { setStudioBackground(b64); setStudioBackgroundName(file.name) }
+    if (type === 'logo') { setStudioLogo(b64); setStudioLogoName(file.name) }
+  }
+
+  const generateStudioAd = async () => {
+    if (!studioCharacter || !studioBackground) { setStudioError('Please upload at least a character and background.'); return }
+    if (!studioHook) { setStudioError('Please add a hook/headline.'); return }
+    setStudioGenerating(true); setStudioError(''); setStudioResults({})
+    try {
+      const formats = studioFormat === 'both' ? ['1:1', '9:16'] : [studioFormat]
+      const results: { square?: string; vertical?: string } = {}
+      for (const fmt of formats) {
+        const res = await fetch('/api/generate-studio-ad', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ character: studioCharacter, background: studioBackground, logo: studioLogo || null, hook: studioHook, body: studioBody, cta: studioCta, format: fmt }),
+        })
+        const data = await res.json()
+        if (data.error) { setStudioError(data.error); break }
+        if (fmt === '1:1') results.square = data.image
+        if (fmt === '9:16') results.vertical = data.image
+      }
+      setStudioResults(results)
+    } catch (e: any) { setStudioError(e.message) }
+    setStudioGenerating(false)
+  }
+
+  const downloadStudioImage = (b64: string, name: string) => {
+    const a = document.createElement('a'); a.href = `data:image/png;base64,${b64}`; a.download = name; a.click()
   }
 
   const scoreColor = (s: number) => s >= 8 ? '#059669' : s >= 6 ? '#D97706' : '#DC2626'
@@ -838,6 +891,7 @@ export default function IntelligencePage() {
             { id: 'analyze', label: '📊 Creative analysis' },
             { id: 'competitor', label: '👁 Competitor analysis' },
             { id: 'creative', label: '✍️ Script to creative' },
+            { id: 'studio', label: '🎨 Ad studio' },
           ].map(t => (
             <button key={t.id} onClick={() => {
               setActiveTab(t.id as Tab)
@@ -1071,6 +1125,59 @@ export default function IntelligencePage() {
                     <p style={{ fontSize: 11, fontWeight: 600, color: '#065F46', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>CTA</p>
                     <p style={{ fontSize: 14, fontWeight: 700, color: '#064E3B', margin: 0 }}>{v.cta}</p>
                   </div>
+
+                  {/* Image brief + generate buttons */}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button onClick={() => generateImageBrief(i, v)} disabled={generatingBrief === i} style={{
+                      flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      border: '1.5px solid #6366F1', background: generatingBrief === i ? '#F3F4F6' : '#EEF2FF',
+                      color: generatingBrief === i ? '#9CA3AF' : '#4F46E5', cursor: generatingBrief === i ? 'not-allowed' : 'pointer'
+                    }}>{generatingBrief === i ? '⏳ Generating brief...' : '📋 Image brief'}</button>
+                    <button onClick={() => generateAdImage(i, v)} disabled={generatingImage === i} style={{
+                      flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      border: 'none', background: generatingImage === i ? '#E5E7EB' : 'linear-gradient(135deg,#6366F1,#8B5CF6)',
+                      color: generatingImage === i ? '#9CA3AF' : '#fff', cursor: generatingImage === i ? 'not-allowed' : 'pointer'
+                    }}>{generatingImage === i ? '⏳ Generating...' : '🎨 Generate image'}</button>
+                  </div>
+
+                  {/* Generated image */}
+                  {generatedImages[i] && (
+                    <div style={{ marginTop: 12 }}>
+                      <img src={`data:image/png;base64,${generatedImages[i]}`} alt="Generated ad" style={{ width: '100%', borderRadius: 8, border: '1px solid #E5E7EB' }} />
+                      <button onClick={() => {
+                        const a = document.createElement('a'); a.href = `data:image/png;base64,${generatedImages[i]}`; a.download = `ad-variant-${i+1}.png`; a.click()
+                      }} style={{ width: '100%', marginTop: 8, padding: '7px 0', borderRadius: 8, fontSize: 12, fontWeight: 500, border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#374151', cursor: 'pointer' }}>⬇ Download</button>
+                    </div>
+                  )}
+
+                  {/* Image brief output */}
+                  {imageBriefs[i] && expandedBrief === i && (
+                    <div style={{ marginTop: 12, background: '#F5F3FF', borderRadius: 8, padding: '12px 14px', border: '1px solid #DDD6FE' }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#5B21B6', margin: '0 0 10px', textTransform: 'uppercase' }}>📋 Image brief</p>
+                      {imageBriefs[i].canva_brief && [
+                        { label: 'Background', val: imageBriefs[i].canva_brief.background },
+                        { label: 'Hero visual', val: imageBriefs[i].canva_brief.hero_visual },
+                        { label: 'Headline', val: imageBriefs[i].canva_brief.text_overlay?.headline },
+                        { label: 'Subtext', val: imageBriefs[i].canva_brief.text_overlay?.subtext },
+                        { label: 'CTA button', val: imageBriefs[i].canva_brief.text_overlay?.cta_button },
+                        { label: 'Layout notes', val: imageBriefs[i].canva_brief.layout_notes },
+                      ].filter(r => r.val).map(row => (
+                        <div key={row.label} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 11, color: '#7C3AED', fontWeight: 600, minWidth: 90 }}>{row.label}</span>
+                          <span style={{ fontSize: 12, color: '#374151' }}>{row.val}</span>
+                        </div>
+                      ))}
+                      {imageBriefs[i].dalle_prompt && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <p style={{ fontSize: 11, fontWeight: 700, color: '#5B21B6', margin: 0 }}>DALL·E prompt</p>
+                            <button onClick={() => copyPrompt(imageBriefs[i].dalle_prompt, `dalle-${i}`)} style={{ padding: '3px 10px', borderRadius: 5, fontSize: 11, border: '1px solid #DDD6FE', background: copiedPrompt === `dalle-${i}` ? '#F0FDF4' : '#F5F3FF', color: copiedPrompt === `dalle-${i}` ? '#059669' : '#7C3AED', cursor: 'pointer' }}>{copiedPrompt === `dalle-${i}` ? '✅ Copied' : 'Copy'}</button>
+                          </div>
+                          <p style={{ fontSize: 11, color: '#374151', margin: 0, fontFamily: 'monospace', background: '#EDE9FE', padding: '8px 10px', borderRadius: 6, lineHeight: 1.6 }}>{imageBriefs[i].dalle_prompt}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1185,6 +1292,106 @@ export default function IntelligencePage() {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── TAB 5: AD STUDIO ── */}
+        {activeTab === 'studio' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 20, alignItems: 'start' }}>
+            {/* Left panel */}
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: 24 }}>
+              <p style={{ fontWeight: 700, fontSize: 15, margin: '0 0 4px', color: '#111827' }}>🎨 Ad Studio</p>
+              <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 20px' }}>Upload elements + script → GPT-4o assembles your ad</p>
+
+              {[
+                { label: 'Character / Rider image *', type: 'character' as const, ref: charRef, name: studioCharacterName },
+                { label: 'Background / Gradient *', type: 'background' as const, ref: bgRef, name: studioBackgroundName },
+                { label: 'Logo (optional)', type: 'logo' as const, ref: logoRef, name: studioLogoName },
+              ].map(el => (
+                <div key={el.type} style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>{el.label}</label>
+                  <input ref={el.ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleStudioUpload(e, el.type)} />
+                  <div onClick={() => el.ref.current?.click()} style={{ border: `1.5px dashed ${el.name ? '#6366F1' : '#D1D5DB'}`, borderRadius: 8, padding: '10px 14px', cursor: 'pointer', background: el.name ? '#EEF2FF' : '#F9FAFB', textAlign: 'center' }}>
+                    {el.name ? <span style={{ fontSize: 12, color: '#4F46E5', fontWeight: 500 }}>✅ {el.name} — click to replace</span> : <span style={{ fontSize: 12, color: '#9CA3AF' }}>📁 Click to upload</span>}
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ height: 1, background: '#F3F4F6', margin: '16px 0' }} />
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', margin: '0 0 10px' }}>Ad script</p>
+
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Hook / Headline *</label>
+              <input value={studioHook} onChange={e => setStudioHook(e.target.value)} placeholder="e.g. Roz ₹1500 kamao — koi target nahi!"
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: 'border-box' as const, color: '#374151' }} />
+
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Body copy</label>
+              <textarea value={studioBody} onChange={e => setStudioBody(e.target.value)} placeholder="e.g. Shiprocket Quick ke saath 3-wheeler chalao..."
+                style={{ width: '100%', minHeight: 60, padding: '8px 10px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, marginBottom: 10, resize: 'vertical' as const, fontFamily: 'inherit', color: '#374151', boxSizing: 'border-box' as const }} />
+
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>CTA</label>
+              <input value={studioCta} onChange={e => setStudioCta(e.target.value)} placeholder="e.g. Abhi Join Karo"
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, marginBottom: 16, boxSizing: 'border-box' as const, color: '#374151' }} />
+
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>Output format</label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                {(['1:1', '9:16', 'both'] as const).map(f => (
+                  <button key={f} onClick={() => setStudioFormat(f)} style={{
+                    padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                    border: studioFormat === f ? '1.5px solid #6366F1' : '1px solid #E5E7EB',
+                    background: studioFormat === f ? '#EEF2FF' : '#fff',
+                    color: studioFormat === f ? '#4F46E5' : '#6B7280', cursor: 'pointer'
+                  }}>{f === 'both' ? 'Both' : f}</button>
+                ))}
+              </div>
+
+              {studioError && <p style={{ fontSize: 12, color: '#DC2626', marginBottom: 12 }}>⚠️ {studioError}</p>}
+
+              <button onClick={generateStudioAd} disabled={studioGenerating} style={{
+                width: '100%', padding: '12px 0',
+                background: studioGenerating ? '#E5E7EB' : 'linear-gradient(135deg,#6366F1,#8B5CF6)',
+                color: studioGenerating ? '#9CA3AF' : '#fff',
+                border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                cursor: studioGenerating ? 'not-allowed' : 'pointer'
+              }}>{studioGenerating ? '⏳ Generating ad...' : '✨ Generate ad'}</button>
+            </div>
+
+            {/* Right panel — output */}
+            <div>
+              {!studioGenerating && !studioResults.square && !studioResults.vertical && (
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '60px 24px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>🖼️</div>
+                  <p style={{ fontSize: 14, color: '#6B7280', margin: 0 }}>Upload your elements and click Generate</p>
+                  <p style={{ fontSize: 12, color: '#9CA3AF', margin: '6px 0 0' }}>GPT-4o blends your character + background + script into a finished ad</p>
+                </div>
+              )}
+              {studioGenerating && (
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '60px 24px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>🤖</div>
+                  <p style={{ fontSize: 14, color: '#6B7280', margin: '0 0 6px' }}>GPT-4o is assembling your ad...</p>
+                  <p style={{ fontSize: 12, color: '#9CA3AF', margin: 0 }}>This takes ~20-30 seconds</p>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: studioResults.square && studioResults.vertical ? '1fr 1fr' : '1fr', gap: 16 }}>
+                {studioResults.square && (
+                  <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid #F3F4F6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Square 1:1</span>
+                      <button onClick={() => downloadStudioImage(studioResults.square!, 'ad-square-1x1.png')} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#374151', cursor: 'pointer' }}>⬇ Download</button>
+                    </div>
+                    <img src={`data:image/png;base64,${studioResults.square}`} alt="Square ad" style={{ width: '100%', display: 'block' }} />
+                  </div>
+                )}
+                {studioResults.vertical && (
+                  <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid #F3F4F6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Vertical 9:16</span>
+                      <button onClick={() => downloadStudioImage(studioResults.vertical!, 'ad-vertical-9x16.png')} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#374151', cursor: 'pointer' }}>⬇ Download</button>
+                    </div>
+                    <img src={`data:image/png;base64,${studioResults.vertical}`} alt="Vertical ad" style={{ width: '100%', display: 'block' }} />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
