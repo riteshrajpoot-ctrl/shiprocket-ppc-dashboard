@@ -220,7 +220,7 @@ function AISidekick({ data, range, onClose }: { data: MetricsData | null; range:
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [activeMetric, setActiveMetric] = useState<'spend' | 'installs' | 'clicks' | 'ctr' | 'cpi'>('spend')
+  const [activeMetric, setActiveMetric] = useState<'installs' | 'first_orders'>('installs')
   const [activeRangeTag, setActiveRangeTag] = useState('MTD')
   const [customStart, setCustomStart] = useState(''); const [customEnd, setCustomEnd] = useState('')
   const [showDateMenu, setShowDateMenu] = useState(false); const [showCustomPicker, setShowCustomPicker] = useState(false)
@@ -262,10 +262,27 @@ export default function Dashboard() {
     finally { setBranchLoading(false) }
   }, [])
 
+  // Branch daily for trend chart
+  const [branchDaily, setBranchDaily] = useState<{ date: string; installs: number; first_orders: number }[]>([])
+  const [branchDailyLoading, setBranchDailyLoading] = useState(true)
+
+  const fetchBranchDaily = useCallback(async (tag: string, cs?: string, ce?: string) => {
+    setBranchDailyLoading(true)
+    try {
+      const r = getDateRange(tag, cs, ce)
+      const res = await fetch(`/api/branch-daily?start_date=${r.start}&end_date=${r.end}`)
+      if (!res.ok) return
+      const json = await res.json()
+      if (!json.error && json.daily) setBranchDaily(json.daily)
+    } catch {}
+    finally { setBranchDailyLoading(false) }
+  }, [])
+
   useEffect(() => {
     fetchMetrics(activeRangeTag, customStart, customEnd)
     fetchBranch(activeRangeTag, customStart, customEnd)
-  }, [activeRangeTag, customStart, customEnd, fetchMetrics, fetchBranch])
+    fetchBranchDaily(activeRangeTag, customStart, customEnd)
+  }, [activeRangeTag, customStart, customEnd, fetchMetrics, fetchBranch, fetchBranchDaily])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -273,16 +290,17 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (!chartLoaded || !data?.daily?.length) return
+    if (!chartLoaded || !branchDaily.length) return
     const W = window as any; if (!W.Chart) return
     const canvas = document.getElementById('trendCanvas') as HTMLCanvasElement; if (!canvas) return
     const ex = W.Chart.getChart(canvas); if (ex) ex.destroy()
-    const colors = { spend: '#378ADD', installs: '#1D9E75', clicks: '#534AB7', ctr: '#EF9F27', cpi: '#E24B4A' }
-    const labels = data.daily.map(d => new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))
-    const values = data.daily.map(d => activeMetric === 'ctr' ? Number(Number(d[activeMetric]).toFixed(2)) : Math.round(Number(d[activeMetric])))
-    const fmtV = (v: number) => activeMetric === 'spend' ? fmtL(v) : activeMetric === 'ctr' ? v.toFixed(2) + '%' : activeMetric === 'cpi' ? '₹' + v : v.toLocaleString('en-IN')
-    new W.Chart(canvas, { type: 'line', data: { labels, datasets: [{ data: values, borderColor: colors[activeMetric], backgroundColor: colors[activeMetric] + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: colors[activeMetric] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx: any) => ' ' + fmtV(ctx.raw) } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { font: { size: 10 }, callback: (v: any) => fmtV(v) } } }, animation: { duration: 300 } } })
-  }, [chartLoaded, data, activeMetric])
+    const colors = { installs: '#1D9E75', first_orders: '#378ADD' }
+    const labels = branchDaily.map(d => new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))
+    const values = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
+    const fmtV = (v: number) => v.toLocaleString('en-IN')
+    const color = activeMetric === 'first_orders' ? colors.first_orders : colors.installs
+    new W.Chart(canvas, { type: 'line', data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: color + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: color }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx: any) => ' ' + fmtV(ctx.raw) } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { font: { size: 10 }, callback: (v: any) => fmtV(v) } } }, animation: { duration: 300 } } })
+  }, [chartLoaded, branchDaily, activeMetric])
 
   // Derived values
   const campaigns = data?.campaigns ?? []
@@ -421,237 +439,67 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── SECTION 2: Supply vs Demand split ── */}
-        <div>
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Supply vs Demand — Meta Ads</div>
-          <div className="grid grid-cols-2 gap-3">
-            {/* Supply */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">🚗 Supply side</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Driver / partner acquisition</div>
-                </div>
-                <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium">{fmtL(supplySpend)} · {Math.round(supplySpend / Math.max(totalSpend, 1) * 100)}% of total</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {[
-                  { label: 'Driver installs', value: loading ? null : supplyInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
-                  { label: 'Cost per install', value: loading ? null : supplyCPI > 0 ? `₹${supplyCPI}` : '—', color: supplyCPI <= 20 ? 'text-emerald-600' : 'text-amber-600' },
-                  { label: 'Avg CTR', value: loading ? null : `${supplyCTR}%`, color: Number(supplyCTR) >= 1 ? 'text-emerald-600' : 'text-amber-600' },
-                ].map(m => (
-                  <div key={m.label} className="bg-slate-50 rounded-lg p-2.5">
-                    <div className="text-xs text-slate-400 mb-1">{m.label}</div>
-                    {m.value === null ? <Skeleton /> : <div className={`text-sm font-semibold ${m.color}`}>{m.value}</div>}
-                  </div>
-                ))}
-              </div>
-              <div className="text-xs text-slate-400 mb-1 flex justify-between"><span>Budget pacing</span><span className={budgetPacing > 80 ? 'text-emerald-600' : 'text-amber-600'}>{Math.round(supplySpend / 179000 * 100)}% used</span></div>
-              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(Math.round(supplySpend / 179000 * 100), 100)}%` }} /></div>
-              <div className="mt-3">
-                <div className="text-xs text-slate-500 font-medium mb-2">Top campaigns by installs</div>
-                {loading ? <Skeleton /> : supplyCampaigns.slice(0, 3).map(c => (
-                  <div key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="flex items-center justify-between py-1.5 border-b border-slate-50 cursor-pointer hover:bg-slate-50 px-1 rounded">
-                    <span className="text-xs text-slate-700 truncate flex-1 mr-2">{c.campaign_name}</span>
-                    <span className="text-xs text-emerald-600 font-medium flex-shrink-0">{Number(c.installs).toLocaleString('en-IN')} · ₹{Math.round(c.cpi)} CPI</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Demand */}
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">📦 Demand side</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Customer acquisition</div>
-                </div>
-                <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">{fmtL(demandSpend)} · {Math.round(demandSpend / Math.max(totalSpend, 1) * 100)}% of total</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {[
-                  { label: 'App installs', value: loading ? null : demandInstalls.toLocaleString('en-IN'), color: 'text-emerald-600' },
-                  { label: 'First orders', value: loading ? null : demandOrders > 0 ? demandOrders.toLocaleString('en-IN') : '—', color: 'text-blue-600' },
-                  { label: 'Cost per order', value: loading ? null : demandCPO > 0 ? `₹${demandCPO}` : '—', color: demandCPO <= 550 ? 'text-emerald-600' : demandCPO <= 800 ? 'text-amber-600' : 'text-red-500' },
-                ].map(m => (
-                  <div key={m.label} className="bg-slate-50 rounded-lg p-2.5">
-                    <div className="text-xs text-slate-400 mb-1">{m.label}</div>
-                    {m.value === null ? <Skeleton /> : <div className={`text-sm font-semibold ${m.color}`}>{m.value}</div>}
-                  </div>
-                ))}
-              </div>
-              <div className="text-xs text-slate-400 mb-1 flex justify-between"><span>Budget pacing</span><span className={Math.round(demandSpend / 152000 * 100) > 80 ? 'text-emerald-600' : 'text-amber-600'}>{Math.round(demandSpend / 152000 * 100)}% used</span></div>
-              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(Math.round(demandSpend / 152000 * 100), 100)}%` }} /></div>
-              <div className="mt-3">
-                <div className="text-xs text-slate-500 font-medium mb-2">Top campaigns by first orders</div>
-                {loading ? <Skeleton /> : demandCampaigns.filter(c => Number(c.first_orders) > 0).sort((a, b) => Number(b.first_orders) - Number(a.first_orders)).slice(0, 3).map(c => (
-                  <div key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="flex items-center justify-between py-1.5 border-b border-slate-50 cursor-pointer hover:bg-slate-50 px-1 rounded">
-                    <span className="text-xs text-slate-700 truncate flex-1 mr-2">{c.campaign_name}</span>
-                    <span className="text-xs text-blue-600 font-medium flex-shrink-0">{Number(c.first_orders)} orders · ₹{Math.round(c.cpo)} CPO</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── SECTION 3: KPI summary bar ── */}
-        <div className="grid grid-cols-5 gap-3">
-          {[
-            { label: 'Total MTD spend', value: loading ? null : fmtL(totalSpend), sub: `of ₹3.5L budget`, delta: `${budgetPacing}% paced`, trend: budgetPacing >= 40 && budgetPacing <= 90 ? 'up' : 'down', icon: <BarChart2 size={14} /> },
-            { label: 'Total installs', value: loading ? null : totalInstalls.toLocaleString('en-IN'), sub: 'All campaigns', delta: `CPI ₹${avgCPI}`, trend: avgCPI <= 20 ? 'up' : 'flat', icon: <Users size={14} /> },
-            { label: 'First orders', value: loading ? null : totalFirstOrders > 0 ? totalFirstOrders.toString() : '—', sub: 'Post-install conversions', delta: totals?.cpo > 0 ? `CPO ₹${Math.round(totals.cpo)}` : 'Awaiting data', trend: totals?.cpo > 0 && totals.cpo <= 800 ? 'up' : 'flat', icon: <ShoppingBag size={14} /> },
-            { label: 'Avg CTR', value: loading ? null : `${avgCTR}%`, sub: 'Across all placements', delta: Number(avgCTR) >= 1 ? 'Above 1% target' : 'Below 1% target', trend: Number(avgCTR) >= 1 ? 'up' : 'down', icon: <Activity size={14} /> },
-            { label: 'Account health', value: loading ? null : `${health}/100`, sub: healthStatus, delta: criticalCount > 0 ? `${criticalCount} critical alerts` : 'All systems good', trend: health >= 80 ? 'up' : health >= 60 ? 'flat' : 'down', icon: <Target size={14} /> },
-          ].map(k => (
-            <div key={k.label} className="bg-white rounded-xl border border-slate-200 p-3.5">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">{k.icon}{k.label}</div>
-              {k.value === null ? <div className="space-y-1.5 mt-1"><Skeleton /><Skeleton /></div> : (
-                <>
-                  <div className="text-xl font-semibold text-slate-800 leading-none">{k.value}</div>
-                  <div className="text-xs text-slate-400 mt-1">{k.sub}</div>
-                  <div className={`text-xs mt-1.5 flex items-center gap-1 ${k.trend === 'up' ? 'text-emerald-600' : k.trend === 'down' ? 'text-red-500' : 'text-slate-400'}`}>
-                    {k.trend === 'up' ? <TrendingUp size={11} /> : k.trend === 'down' ? <TrendingDown size={11} /> : <Minus size={11} />}{k.delta}
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* ── SECTION 4: Trend chart + alerts ── */}
+        {/* ── SECTION 2: Trend chart + alerts ── */}
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-4">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div><span className="text-sm font-semibold text-slate-700">Performance trends</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
-              <div className="flex gap-1.5 flex-wrap">
-                {(['spend', 'installs', 'clicks', 'ctr', 'cpi'] as const).map(key => (
+              <div>
+                <span className="text-sm font-semibold text-slate-700">Performance trends</span>
+                <span className="text-xs text-slate-400 ml-2">{range.label}</span>
+                <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium ml-2">Branch · all channels</span>
+              </div>
+              <div className="flex gap-1.5">
+                {([
+                  { key: 'installs', label: 'Installs' },
+                  { key: 'first_orders', label: 'First orders' },
+                ] as const).map(({ key, label }) => (
                   <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
-                    {key.charAt(0).toUpperCase() + key.slice(1)}
+                    {label}
                   </button>
                 ))}
               </div>
             </div>
-            <div style={{ position: 'relative', height: '160px' }}>
-              {loading ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading chart...</div> : <canvas id="trendCanvas" />}
+            <div style={{ position: 'relative', height: '180px' }}>
+              {branchDailyLoading ? <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">Loading Branch data...</div> : branchDaily.length === 0 ? <div className="flex items-center justify-center h-full text-xs text-slate-400">No data available</div> : <canvas id="trendCanvas" />}
             </div>
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
               <div className="flex gap-6">
-                <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{loading ? '—' : fmtMetric(avgMetric)}</div></div>
-                <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{loading ? '—' : peakLabel}</div></div>
-                <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{loading ? '—' : lowLabel}</div></div>
+                {(() => {
+                  const vals = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
+                  const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
+                  const peak = vals.length ? Math.max(...vals) : 0
+                  const peakDate = branchDaily[vals.indexOf(peak)]?.date
+                  const low = vals.length ? Math.min(...vals) : 0
+                  const lowDate = branchDaily[vals.indexOf(low)]?.date
+                  const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
+                  return <>
+                    <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{avg.toLocaleString('en-IN')}</div></div>
+                    <div><div className="text-xs text-slate-400">Peak day</div><div className="text-sm font-semibold text-emerald-600 mt-0.5">{peak.toLocaleString('en-IN')} ({fmt(peakDate)})</div></div>
+                    <div><div className="text-xs text-slate-400">Lowest day</div><div className="text-sm font-semibold text-red-500 mt-0.5">{low.toLocaleString('en-IN')} ({fmt(lowDate)})</div></div>
+                  </>
+                })()}
               </div>
               <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI to analyse ↗</button>
             </div>
           </div>
 
-          {/* Alerts + health */}
-          <div className="flex flex-col gap-3">
-            <div className="bg-white rounded-xl border border-slate-200 p-4 flex-1">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Bell size={13} className="text-slate-400" />Alerts</span>
-                {criticalCount > 0 && <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">{criticalCount} critical</span>}
-              </div>
-              {loading ? <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}</div> :
-                alerts.length === 0 ? <div className="text-xs text-emerald-600 py-2 flex items-center gap-1.5"><CheckCircle size={12} />All campaigns healthy</div> :
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {alerts.map((a, i) => (
-                      <div key={i} className="flex gap-2 py-1.5 border-b border-slate-50 last:border-0">
-                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-amber-400'}`} />
-                        <div><div className="text-xs text-slate-700 leading-snug">{a.msg}</div><div className="text-xs text-slate-400 mt-0.5">{a.time}</div></div>
-                      </div>
-                    ))}
-                  </div>
-              }
+          {/* Alerts only */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Bell size={13} className="text-slate-400" />Alerts</span>
+              {criticalCount > 0 && <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-medium">{criticalCount} critical</span>}
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-slate-700">Account health</span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: healthColor + '20', color: healthColor }}>{health}/100 · {healthStatus}</span>
-              </div>
-              <div className="space-y-1.5">
-                {(healthBreakdown.length > 0 ? healthBreakdown : [
-                  { label: 'Budget pacing', score: 0, max: 20 }, { label: 'CPI vs target', score: 0, max: 20 },
-                  { label: 'CTR quality', score: 0, max: 15 }, { label: 'Ad strength', score: 0, max: 15 },
-                  { label: 'Reach diversity', score: 0, max: 15 }, { label: 'Wasted spend', score: 0, max: 15 },
-                ]).map(s => (
-                  <div key={s.label} className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 w-24 flex-shrink-0">{s.label}</span>
-                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${(s.score / s.max) * 100}%`, background: scoreColor(s.score, s.max) }} />
+            {loading ? <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}</div> :
+              alerts.length === 0 ? <div className="text-xs text-emerald-600 py-2 flex items-center gap-1.5"><CheckCircle size={12} />All campaigns healthy</div> :
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {alerts.map((a, i) => (
+                    <div key={i} className="flex gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${a.severity === 'critical' ? 'bg-red-500' : 'bg-amber-400'}`} />
+                      <div><div className="text-xs text-slate-700 leading-snug">{a.msg}</div><div className="text-xs text-slate-400 mt-0.5">{a.time}</div></div>
                     </div>
-                    <span className="text-xs font-medium text-slate-600 w-4 text-right">{s.score}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── SECTION 5: Campaign table ── */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div><span className="text-sm font-semibold text-slate-700">All campaigns</span><span className="text-xs text-slate-400 ml-2">{range.label}</span></div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">{campaigns.length} campaigns</span>
-              <button onClick={() => setShowSidekick(true)} className="text-xs px-3 py-1 rounded-lg border border-slate-200 text-slate-600 cursor-pointer hover:bg-slate-50">Ask AI ↗</button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{ tableLayout: 'fixed', minWidth: '800px' }}>
-              <thead>
-                <tr className="text-xs text-slate-400 border-b border-slate-100">
-                  <th className="text-left pb-2 font-medium w-2/5">Campaign</th>
-                  <th className="text-right pb-2 font-medium w-16">Spend</th>
-                  <th className="text-right pb-2 font-medium w-16">Installs</th>
-                  <th className="text-right pb-2 font-medium w-14">CPI</th>
-                  <th className="text-right pb-2 font-medium w-16">1st Orders</th>
-                  <th className="text-right pb-2 font-medium w-14">CPO</th>
-                  <th className="text-right pb-2 font-medium w-12">CTR</th>
-                  <th className="text-right pb-2 font-medium w-20">Type</th>
-                  <th className="w-5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i} className="border-b border-slate-50">{Array.from({ length: 7 }).map((_, j) => <td key={j} className="py-2.5 pl-2"><Skeleton /></td>)}</tr>
-                )) : campaigns.map(c => {
-                  const isSupply = supplyCampaigns.includes(c)
-                  return (
-                    <tr key={c.campaign_id} onClick={() => setSelectedCampaign(c)} className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer group">
-                      <td className="py-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSupply ? 'bg-purple-400' : 'bg-blue-400'}`} />
-                          <span className="text-xs font-medium text-slate-800 truncate">{c.campaign_name}</span>
-                        </div>
-                      </td>
-                      <td className="text-right text-xs text-slate-700">{fmtL(Number(c.spend))}</td>
-                      <td className="text-right text-xs">{Number(c.installs) > 0 ? <span className={Number(c.installs) > 1000 ? 'text-emerald-600 font-medium' : 'text-slate-700'}>{Number(c.installs).toLocaleString('en-IN')}</span> : <span className="text-slate-400">—</span>}</td>
-                      <td className="text-right"><CpiPill val={Number(c.cpi)} /></td>
-                      <td className="text-right text-xs">{Number(c.first_orders) > 0 ? <span className="font-medium text-blue-600">{Number(c.first_orders)}</span> : <span className="text-slate-300">—</span>}</td>
-                      <td className="text-right text-xs">{Number(c.cpo) > 0 ? <span className={Number(c.cpo) <= 800 ? 'font-medium text-emerald-600' : 'font-medium text-amber-600'}>₹{Math.round(Number(c.cpo))}</span> : <span className="text-slate-300">—</span>}</td>
-                      <td className={`text-right text-xs ${Number(c.ctr) < 0.3 ? 'text-red-500 font-medium' : 'text-slate-700'}`}>{Number(c.ctr).toFixed(2)}%</td>
-                      <td className="text-right"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isSupply ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{isSupply ? 'Supply' : 'Demand'}</span></td>
-                      <td className="text-right"><ChevronRight size={12} className="text-slate-300 group-hover:text-slate-500" /></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              {!loading && campaigns.length > 0 && (
-                <tfoot>
-                  <tr className="border-t border-slate-200">
-                    <td className="pt-2 text-xs font-semibold text-slate-700">Total</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{fmtL(totalSpend)}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-emerald-600">{totalInstalls.toLocaleString('en-IN')}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">₹{avgCPI}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-blue-600">{totalFirstOrders}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{totals?.cpo > 0 ? `₹${Math.round(totals.cpo)}` : '—'}</td>
-                    <td className="pt-2 text-right text-xs font-semibold text-slate-700">{avgCTR}%</td>
-                    <td /><td />
-                  </tr>
-                </tfoot>
-              )}
-            </table>
+                  ))}
+                </div>
+            }
           </div>
         </div>
       </div>
