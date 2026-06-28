@@ -185,15 +185,41 @@ function BudgetOptimizer({ suggestions, onClose }: { suggestions: BudgetSuggesti
 }
 
 // ── AI Sidekick ───────────────────────────────────────────────────────────────
-function AISidekick({ data, range, onClose }: { data: MetricsData | null; range: string; onClose: () => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: `Hi! I have live data for ${range}. Ask me anything — "Why is CPI high?", "Which campaign to scale?", "How's budget pacing?"` }])
+function AISidekick({ data, branchData, ads, playbookInsights, range, onClose }: { data: MetricsData | null; branchData: any; ads: any[]; playbookInsights: any; range: string; onClose: () => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: `Hi! I have full live data for ${range} — Meta campaigns, ad-level creatives, Branch attribution and playbook insights. Ask me anything about performance, creatives, or what to do next.` }])
   const [input, setInput] = useState(''); const [thinking, setThinking] = useState(false); const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   const send = async (msg?: string) => {
     const userMsg = msg || input.trim(); if (!userMsg || thinking) return; setInput('')
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]); setThinking(true)
     try {
-      const context = data ? `Period: ${range}\nSpend: ${fmtL(data.totals.spend)} | Installs: ${data.totals.installs} | CPI: ₹${data.totals.cpi} | CTR: ${data.totals.ctr}%\nHealth: ${data.health}/100\nCampaigns: ${data.campaigns.map(c => `${c.campaign_name}(₹${Math.round(c.spend)},${c.installs} installs,CPI:₹${Math.round(c.cpi)},CTR:${c.ctr}%)`).join('; ')}\nAlerts: ${data.alerts.map(a => a.msg).join('; ')}` : 'No data.'
+      const metaContext = data ? `
+META ADS (${range}):
+Total spend: ${fmtL(data.totals.spend)} | Total installs: ${data.totals.installs} | Avg CPI: ₹${data.totals.cpi} | Avg CTR: ${data.totals.ctr}%
+Health score: ${data.health}/100
+Campaigns (name, spend, installs, CPI, CTR, first_orders, CPO):
+${data.campaigns.map(c => `- ${c.campaign_name}: spend ₹${Math.round(Number(c.spend))}, installs ${c.installs}, CPI ₹${Math.round(Number(c.cpi))}, CTR ${c.ctr}%, first_orders ${c.first_orders || 0}, CPO ${c.cpo ? '₹' + Math.round(Number(c.cpo)) : 'N/A'}`).join('\n')}
+Alerts: ${data.alerts.map(a => a.msg).join('; ')}` : 'No Meta data.'
+
+      const branchContext = branchData ? `
+BRANCH (all channels, ${range}):
+Total installs: ${branchData.total_installs} | Total first orders: ${branchData.total_orders} | Install→order rate: ${branchData.total_installs > 0 ? ((branchData.total_orders / branchData.total_installs) * 100).toFixed(1) : 0}%
+By partner: ${(branchData.by_partner || []).map((p: any) => `${p.partner}: ${p.installs} installs, ${p.orders} orders`).join('; ')}
+Top campaigns by first orders: ${(branchData.by_campaign || []).filter((c: any) => c.orders > 0).slice(0, 10).map((c: any) => `${c.campaign}(${c.ad_partner}): ${c.installs} installs, ${c.orders} orders`).join('; ')}` : 'No Branch data.'
+
+      const adContext = ads.length > 0 ? `
+AD LEVEL CREATIVES (top 15 by spend):
+${ads.slice(0, 15).map((a: any) => `- ${a.ad_name}: spend ₹${Math.round(Number(a.spend))}, CTR ${Number(a.ctr).toFixed(2)}%, installs ${a.installs || 0}, CPI ${a.cpi ? '₹' + a.cpi : 'N/A'}, side: ${a.ad_side || 'unknown'}, copy: "${(a.creative_body || '').slice(0, 80)}"`).join('\n')}` : ''
+
+      const playbookContext = playbookInsights && Object.keys(playbookInsights).length > 0 ? `
+CREATIVE PLAYBOOK INSIGHTS (AI-analysed):
+${Object.entries(playbookInsights).map(([cellKey, insights]: [string, any]) => {
+  const cell = cellKey.replace(/\|/g, ' · ')
+  const lines = (insights as any[]).map((ins: any) => `  ${ins.direction} — ${ins.dimension}: "${ins.value}" (CTR ${ins.avg_ctr}%${ins.avg_cpi > 0 ? `, CPI ₹${ins.avg_cpi}` : ''}${ins.trendNote ? `, trend: ${ins.trendNote}` : ''})`).join('\n')
+  return `${cell}:\n${lines}`
+}).join('\n')}` : ''
+
+      const context = [metaContext, branchContext, adContext, playbookContext].filter(Boolean).join('\n')
       const res = await fetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: userMsg, context, history: messages.slice(-6) }) })
       const json = await res.json(); setMessages(prev => [...prev, { role: 'assistant', content: json.reply || 'Could not get response.' }])
     } catch { setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]) }
@@ -212,7 +238,7 @@ function AISidekick({ data, range, onClose }: { data: MetricsData | null; range:
       </div>
       <div className="px-3 pb-3">
         <div className="flex gap-2"><input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Ask about your campaigns..." className="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 outline-none focus:border-blue-300" /><button onClick={() => send()} disabled={thinking || !input.trim()} className="p-2 rounded-xl bg-blue-900 text-blue-50 border-none cursor-pointer disabled:opacity-40"><Send size={12} /></button></div>
-        <div className="flex gap-1.5 mt-2 flex-wrap">{['Why is CPI high?', 'Best campaign?', 'Scale budget?'].map(q => <button key={q} onClick={() => send(q)} className="text-xs px-2 py-1 rounded-lg bg-slate-100 text-slate-500 border-none cursor-pointer hover:bg-slate-200">{q}</button>)}</div>
+        <div className="flex gap-1.5 mt-2 flex-wrap">{['Which campaign has highest first orders?', 'Why is CPI high?', 'Best campaign to scale?'].map(q => <button key={q} onClick={() => send(q)} className="text-xs px-2 py-1 rounded-lg bg-slate-100 text-slate-500 border-none cursor-pointer hover:bg-slate-200">{q}</button>)}</div>
       </div>
     </div>
   )
@@ -268,6 +294,22 @@ export default function Dashboard() {
   const [branchDailyLoading, setBranchDailyLoading] = useState(true)
   const [activePartner, setActivePartner] = useState('All')
   const [activeTrendChannel, setActiveTrendChannel] = useState('All')
+
+  // Ad level data for AI Sidekick
+  const [adsForSidekick, setAdsForSidekick] = useState<any[]>([])
+
+  useEffect(() => {
+    // Fetch ad-level data for sidekick context
+    const fetchAds = async () => {
+      try {
+        const r = getDateRange(activeRangeTag, customStart, customEnd)
+        const res = await fetch(`/api/ad-level-report?date_start=${r.start}&date_end=${r.end}`)
+        const json = await res.json()
+        if (json.ads) setAdsForSidekick(json.ads)
+      } catch {}
+    }
+    fetchAds()
+  }, [activeRangeTag, customStart, customEnd])
 
   const fetchBranchDaily = useCallback(async (tag: string, cs?: string, ce?: string) => {
     setBranchDailyLoading(true)
@@ -354,7 +396,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-slate-50" onClick={() => setShowDateMenu(false)}>
       {selectedCampaign && <DrilldownModal campaign={selectedCampaign} onClose={() => setSelectedCampaign(null)} />}
       {showOptimizer && <BudgetOptimizer suggestions={budgetSuggestions} onClose={() => setShowOptimizer(false)} />}
-      {showSidekick && <AISidekick data={data} range={range.label} onClose={() => setShowSidekick(false)} />}
+      {showSidekick && <AISidekick data={data} branchData={branchData} ads={adsForSidekick} playbookInsights={{}} range={range.label} onClose={() => setShowSidekick(false)} />}
 
       {/* Topbar */}
       <div className="bg-white border-b border-slate-200 px-4 h-11 flex items-center gap-2 sticky top-0 z-20">
