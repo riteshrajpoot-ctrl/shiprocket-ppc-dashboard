@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic'
+
 const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN!
 const META_ACCOUNT_ID = 'act_596746546417726'
 const BRANCH_KEY = process.env.BRANCH_KEY!
