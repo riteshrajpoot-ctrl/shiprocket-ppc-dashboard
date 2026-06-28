@@ -223,7 +223,7 @@ export default function AffiliatePage() {
                         )}
 
                         {isExp && (
-                          <div style={{ marginTop: 8, space: 4 }}>
+                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
                             {p.signals.map((s, i) => (
                               <div key={i} style={{ background: severityConfig[s.severity].bg, borderRadius: 6, padding: '6px 10px', marginTop: 4 }}>
                                 <div style={{ fontSize: 11, fontWeight: 600, color: severityConfig[s.severity].color }}>{severityConfig[s.severity].label} · {s.type}</div>
