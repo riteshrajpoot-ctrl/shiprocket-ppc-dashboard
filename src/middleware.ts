@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/api/auth']
+const PUBLIC_PATHS = ['/login', '/api/']
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // Allow public paths and static files
+  // Allow public paths, API routes and static files
   if (
     PUBLIC_PATHS.some(p => pathname.startsWith(p)) ||
     pathname.startsWith('/_next') ||
