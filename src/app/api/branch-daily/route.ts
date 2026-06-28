@@ -104,8 +104,27 @@ export async function GET(request: Request) {
   try {
     const chunks = chunkDateRange(startDate, endDate, 7)
     const allDates = generateDates(startDate, endDate)
+
+    // Total daily map
     const dailyMap: Record<string, { date: string; installs: number; first_orders: number }> = {}
     allDates.forEach(d => { dailyMap[d] = { date: d, installs: 0, first_orders: 0 } })
+
+    // Per-channel daily map: { 'google': { '2026-06-01': { installs, first_orders } } }
+    const channelMap: Record<string, Record<string, { installs: number; first_orders: number }>> = {}
+
+    const getChannel = (partner: string): string => {
+      const p = (partner || '').toLowerCase()
+      if (p.includes('google') || p.includes('adword')) return 'google'
+      if (p.includes('facebook') || p.includes('meta')) return 'facebook'
+      if (p.includes('apple')) return 'apple'
+      if (!partner || partner === '(organic)' || p === 'organic') return 'organic'
+      return 'affiliate'
+    }
+
+    const initChannel = (ch: string, date: string) => {
+      if (!channelMap[ch]) channelMap[ch] = {}
+      if (!channelMap[ch][date]) channelMap[ch][date] = { installs: 0, first_orders: 0 }
+    }
 
     let rawInstallSample: any[] = []
     let rawOrderSample: any[] = []
@@ -117,10 +136,12 @@ export async function GET(request: Request) {
       if (i === 0) rawInstallSample = results.slice(0, 3)
       for (const r of results) {
         const date = extractDate(r, chunks[i].start)
-        if (dailyMap[date]) {
-          // With dimensions, count is in r.result.total_count — sum across all campaign/partner combos per day
-          dailyMap[date].installs += Number(r.result?.total_count || 0)
-        }
+        const count = Number(r.result?.total_count || 0)
+        const partner = r.result?.last_attributed_touch_data_tilde_advertising_partner_name || ''
+        const channel = getChannel(partner)
+        if (dailyMap[date]) dailyMap[date].installs += count
+        initChannel(channel, date)
+        channelMap[channel][date].installs += count
       }
     }
 
@@ -133,22 +154,31 @@ export async function GET(request: Request) {
       if (i === 0) rawOrderSample = results.slice(0, 3)
       for (const r of results) {
         const date = extractDate(r, chunks[i].start)
-        if (dailyMap[date]) {
-          dailyMap[date].first_orders += Number(r.result?.total_count || 0)
-        }
+        const count = Number(r.result?.total_count || 0)
+        const partner = r.result?.last_attributed_touch_data_tilde_advertising_partner_name || ''
+        const channel = getChannel(partner)
+        if (dailyMap[date]) dailyMap[date].first_orders += count
+        initChannel(channel, date)
+        channelMap[channel][date].first_orders += count
       }
     }
 
     const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date))
 
-    const response: any = { daily, date_range: { start: startDate, end: endDate } }
+    // Build per-channel daily arrays
+    const byChannel: Record<string, { date: string; installs: number; first_orders: number }[]> = {}
+    for (const [ch, dateData] of Object.entries(channelMap)) {
+      byChannel[ch] = allDates.map(d => ({
+        date: d,
+        installs: dateData[d]?.installs || 0,
+        first_orders: dateData[d]?.first_orders || 0,
+      }))
+    }
 
-    // Include raw sample when debug=true so we can see exact Branch response structure
+    const response: any = { daily, by_channel: byChannel, date_range: { start: startDate, end: endDate } }
+
     if (debug) {
-      response.debug = {
-        raw_install_sample: rawInstallSample,
-        raw_order_sample: rawOrderSample,
-      }
+      response.debug = { raw_install_sample: rawInstallSample, raw_order_sample: rawOrderSample }
     }
 
     return NextResponse.json(response)
