@@ -10,6 +10,10 @@ interface Partner {
   cti: number | null; cvr: number | null
   risk_score: number; risk_level: 'High' | 'Medium' | 'Low'
   signals: Signal[]; campaigns: Campaign[]
+  cann_score: number; cann_level: 'High' | 'Medium' | 'Low'
+  cann_signals: { msg: string; type: 'critical' | 'warning' | 'ok' }[]
+  cann_action: string
+  estimated_paid: number; estimated_wasted: number
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ export default function AffiliatePage() {
   const [loading, setLoading] = useState(true)
   const [partners, setPartners] = useState<Partner[]>([])
   const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'fraud'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'fraud' | 'cannibalization'>('overview')
   const [expandedPartner, setExpandedPartner] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -100,7 +104,7 @@ export default function AffiliatePage() {
           </div>
           {/* Tabs */}
           <div style={{ display: 'flex', gap: 2, marginLeft: 20, borderBottom: 'none' }}>
-            {[{ id: 'overview', label: '📊 Performance' }, { id: 'fraud', label: '🛡️ Fraud detection' }].map(t => (
+            {[{ id: 'overview', label: '📊 Performance' }, { id: 'fraud', label: '🛡️ Fraud detection' }, { id: 'cannibalization', label: '⚠️ Cannibalization' }].map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id as any)} style={{
                 padding: '6px 14px', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: activeTab === t.id ? 600 : 400,
                 background: activeTab === t.id ? '#111827' : 'transparent',
@@ -438,6 +442,135 @@ export default function AffiliatePage() {
           Data: Branch attribution · Clicks, installs and orders via Branch Query API · Risk scores calculated from CTI and CVR signals
         </div>
       </div>
+
+      {/* ── CANNIBALIZATION TAB ── */}
+      {activeTab === 'cannibalization' && (
+        <>
+          {/* Explainer */}
+          <div style={{ background: '#fff', border: '.5px solid #E5E7EB', borderRadius: 12, padding: '16px 20px', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 6 }}>What is cannibalization in affiliate?</div>
+            <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.7, marginBottom: 12 }}>
+              On a CPO model, affiliates get paid only when a first order happens. Fraudulent affiliates send millions of fake clicks so that when a user — who was already going to install via Meta or organic — opens the app, Branch attributes the order to them. You pay ₹500 for an order that was already going to happen.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {[
+                { label: 'CTI < 0.5%', desc: 'Mass fake clicks to steal attribution', risk: 'Critical', color: '#DC2626', bg: '#FEF2F2' },
+                { label: 'CVR > 40%', desc: 'Users were already converting from other channels', risk: 'Critical', color: '#DC2626', bg: '#FEF2F2' },
+                { label: 'CTI 0.5–2%', desc: 'Sub-publisher click inflation — monitor', risk: 'Watch', color: '#D97706', bg: '#FFFBEB' },
+              ].map(c => (
+                <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{c.label} → {c.risk}</div>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>{c.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Per-partner cannibalization assessment */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+              Cannibalization risk per partner
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {loading ? Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{ background: '#fff', border: '.5px solid #E5E7EB', borderRadius: 12, padding: 16, height: 100 }}><Sk /></div>
+              )) : [...partners].sort((a, b) => b.cann_score - a.cann_score).map(p => {
+                const rc = riskConfig[p.cann_level]
+                const color = partnerColor(p.partner)
+                return (
+                  <div key={p.partner} style={{ background: '#fff', border: `.5px solid ${rc.border}`, borderRadius: 12, padding: '16px 18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                      {/* Partner */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 180 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: color + '15', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color }}>{p.partner.charAt(0).toUpperCase()}</span>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{p.partner}</div>
+                          <div style={{ fontSize: 10, color: '#9CA3AF' }}>Paying ₹{(p.estimated_paid / 1000).toFixed(0)}K/month</div>
+                        </div>
+                      </div>
+
+                      {/* Score */}
+                      <div style={{ minWidth: 140 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: rc.dot }} />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: rc.color }}>{p.cann_level} risk</span>
+                          <span style={{ fontSize: 11, color: '#9CA3AF' }}>{p.cann_score}/100</span>
+                        </div>
+                        <div style={{ height: 4, background: '#F1F5F9', borderRadius: 2, overflow: 'hidden', width: 140 }}>
+                          <div style={{ width: `${p.cann_score}%`, height: '100%', background: rc.color, borderRadius: 2 }} />
+                        </div>
+                      </div>
+
+                      {/* CTI + CVR */}
+                      <div style={{ display: 'flex', gap: 16, minWidth: 140 }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 2 }}>CTI rate</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: p.cti !== null ? (p.cti < 2 ? '#DC2626' : '#059669') : '#9CA3AF' }}>
+                            {p.cti !== null ? `${p.cti}%` : '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 2 }}>CVR</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: p.cvr !== null ? (p.cvr > 40 ? '#DC2626' : p.cvr >= 5 ? '#059669' : '#D97706') : '#9CA3AF' }}>
+                            {p.cvr !== null ? `${p.cvr}%` : '—'}
+                          </div>
+                        </div>
+                        {p.estimated_wasted > 0 && (
+                          <div>
+                            <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 2 }}>Est. wasted</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#DC2626' }}>₹{(p.estimated_wasted / 1000).toFixed(0)}K</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Signals */}
+                      <div style={{ flex: 1 }}>
+                        {p.cann_signals.map((s, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                            <span style={{ fontSize: 12, flexShrink: 0 }}>{s.type === 'critical' ? '🔴' : s.type === 'warning' ? '🟡' : '🟢'}</span>
+                            <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.5 }}>{s.msg}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Action */}
+                      <div style={{ flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+                          background: p.cann_level === 'High' ? '#FEF2F2' : p.cann_level === 'Medium' ? '#FFFBEB' : '#ECFDF5',
+                          color: p.cann_level === 'High' ? '#DC2626' : p.cann_level === 'Medium' ? '#D97706' : '#059669',
+                          border: `.5px solid ${p.cann_level === 'High' ? '#FECACA' : p.cann_level === 'Medium' ? '#FDE68A' : '#A7F3D0'}`,
+                          display: 'block', textAlign: 'center',
+                        }}>{p.cann_action}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* How to act */}
+          <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 12, padding: '16px 20px' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#92400E', marginBottom: 10 }}>How to act on this</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {[
+                { step: '1. Pause high-risk partners first', desc: 'Remove My Boors, WingAds from your affiliate program temporarily. Measure if your organic first orders increase — if they do, the cannibalization is confirmed.' },
+                { step: '2. Ask for sub-publisher breakdown', desc: 'Request campaign-level click data from the partner. Specific sub-publishers are often the bad actors, not the entire network.' },
+                { step: '3. Set CTI thresholds in Branch', desc: 'In Branch Fraud Manager, enable "Low Conversion CTI" rule with a 2% minimum. Any partner below this gets auto-blocked.' },
+                { step: '4. Negotiate incrementality test', desc: 'Run a holdout test — pause the partner for 2 weeks, compare first orders. If orders don\'t drop, they were fully cannibalizing.' },
+              ].map(a => (
+                <div key={a.step} style={{ background: '#fff', borderRadius: 8, padding: '10px 12px', border: '.5px solid #FDE68A' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#92400E', marginBottom: 4 }}>{a.step}</div>
+                  <div style={{ fontSize: 11, color: '#78350F', lineHeight: 1.5 }}>{a.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
