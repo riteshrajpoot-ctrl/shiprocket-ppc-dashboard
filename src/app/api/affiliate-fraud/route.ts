@@ -119,7 +119,7 @@ export async function GET(request: Request) {
     const allPartners = new Set([...Object.keys(clickMap), ...Object.keys(installMap), ...Object.keys(orderMap)])
     const partners: any[] = []
 
-    for (const partner of allPartners) {
+    for (const partner of Array.from(allPartners)) {
       if (!isAffiliate(partner)) continue
 
       const totalClicks = Object.values(clickMap[partner] || {}).reduce((a, b) => a + b, 0)
