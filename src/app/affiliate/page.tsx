@@ -448,10 +448,6 @@ export default function AffiliatePage() {
         <>
           {/* Explainer */}
           <div style={{ background: '#fff', border: '.5px solid #E5E7EB', borderRadius: 12, padding: '16px 20px', marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 6 }}>What is cannibalization in affiliate?</div>
-            <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.7, marginBottom: 12 }}>
-              On a CPO model, affiliates get paid only when a first order happens. Fraudulent affiliates send millions of fake clicks so that when a user — who was already going to install via Meta or organic — opens the app, Branch attributes the order to them. You pay ₹500 for an order that was already going to happen.
-            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
               {[
                 { label: 'CTI < 0.5%', desc: 'Mass fake clicks to steal attribution', risk: 'Critical', color: '#DC2626', bg: '#FEF2F2' },
