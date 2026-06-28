@@ -152,6 +152,46 @@ export async function GET(request: Request) {
       const riskScore = Math.min(100, highCount * 35 + medCount * 15)
       const riskLevel = riskScore >= 60 ? 'High' : riskScore >= 25 ? 'Medium' : 'Low'
 
+      // Cannibalization score
+      const cannSignals: { msg: string; type: 'critical' | 'warning' | 'ok' }[] = []
+      let cannScore = 0
+
+      if (cti !== null) {
+        if (cti < 0.5) {
+          cannScore += 40
+          cannSignals.push({ type: 'critical', msg: `CTI ${cti.toFixed(2)}% is near zero — partner sending mass fake clicks to steal attribution credit from organic/Meta traffic` })
+        } else if (cti < 2) {
+          cannScore += 15
+          cannSignals.push({ type: 'warning', msg: `CTI ${cti.toFixed(1)}% is below 2% safe threshold — possible click inflation from sub-publishers` })
+        }
+      }
+
+      if (cvr !== null) {
+        if (cvr > 60) {
+          cannScore += 30
+          cannSignals.push({ type: 'critical', msg: `CVR ${cvr.toFixed(1)}% is unrealistically high — these users were already converting from other channels, not genuinely driven by this partner` })
+        } else if (cvr > 30) {
+          cannScore += 15
+          cannSignals.push({ type: 'warning', msg: `CVR ${cvr.toFixed(1)}% is high — could be retargeting existing users rather than acquiring new ones` })
+        } else if (cvr >= 5 && cvr <= 20) {
+          cannSignals.push({ type: 'ok', msg: `CVR ${cvr.toFixed(1)}% is realistic — consistent with genuine new user acquisition` })
+        }
+      }
+
+      if (totalClicks > 100000 && totalOrders > 0 && cvr !== null && cvr > 40) {
+        cannScore += 25
+        cannSignals.push({ type: 'critical', msg: `${(totalClicks / 100000).toFixed(1)}L clicks with ${cvr.toFixed(0)}% CVR — classic click flooding + cannibalization pattern` })
+      }
+
+      // Estimated wasted spend (CPO ₹500, 65% attribution)
+      const CPO_RATE = 500
+      const ATTRIBUTION_PCT = 0.65
+      const estimatedPaid = Math.round(totalOrders * ATTRIBUTION_PCT) * CPO_RATE
+      const estimatedWasted = cannScore >= 60 ? estimatedPaid : cannScore >= 25 ? Math.round(estimatedPaid * 0.4) : 0
+
+      const cannLevel = cannScore >= 60 ? 'High' : cannScore >= 25 ? 'Medium' : 'Low'
+      const cannAction = cannScore >= 60 ? 'Pause & investigate' : cannScore >= 25 ? 'Monitor closely' : 'Genuine — scale cautiously'
+
       // Campaign breakdown
       const allCampaigns = new Set([
         ...Object.keys(clickMap[partner] || {}),
@@ -178,6 +218,12 @@ export async function GET(request: Request) {
         risk_score: riskScore,
         risk_level: riskLevel,
         signals,
+        cann_score: Math.min(100, cannScore),
+        cann_level: cannLevel,
+        cann_signals: cannSignals,
+        cann_action: cannAction,
+        estimated_paid: estimatedPaid,
+        estimated_wasted: estimatedWasted,
         campaigns,
       })
     }
