@@ -264,8 +264,10 @@ export default function Dashboard() {
 
   // Branch daily for trend chart
   const [branchDaily, setBranchDaily] = useState<{ date: string; installs: number; first_orders: number }[]>([])
+  const [branchByChannel, setBranchByChannel] = useState<Record<string, { date: string; installs: number; first_orders: number }[]>>({})
   const [branchDailyLoading, setBranchDailyLoading] = useState(true)
   const [activePartner, setActivePartner] = useState('All')
+  const [activeTrendChannel, setActiveTrendChannel] = useState('All')
 
   const fetchBranchDaily = useCallback(async (tag: string, cs?: string, ce?: string) => {
     setBranchDailyLoading(true)
@@ -274,7 +276,10 @@ export default function Dashboard() {
       const res = await fetch(`/api/branch-daily?start_date=${r.start}&end_date=${r.end}`)
       if (!res.ok) return
       const json = await res.json()
-      if (!json.error && json.daily) setBranchDaily(json.daily)
+      if (!json.error && json.daily) {
+        setBranchDaily(json.daily)
+        if (json.by_channel) setBranchByChannel(json.by_channel)
+      }
     } catch {}
     finally { setBranchDailyLoading(false) }
   }, [])
@@ -291,17 +296,24 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (!chartLoaded || !branchDaily.length) return
+    if (!chartLoaded) return
     const W = window as any; if (!W.Chart) return
     const canvas = document.getElementById('trendCanvas') as HTMLCanvasElement; if (!canvas) return
     const ex = W.Chart.getChart(canvas); if (ex) ex.destroy()
+
+    // Pick data source based on active channel
+    const chartData = activeTrendChannel === 'All'
+      ? branchDaily
+      : (branchByChannel[activeTrendChannel.toLowerCase()] || branchByChannel[activeTrendChannel] || [])
+
+    if (!chartData.length) return
+
     const colors = { installs: '#1D9E75', first_orders: '#378ADD' }
-    const labels = branchDaily.map(d => new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))
-    const values = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
-    const fmtV = (v: number) => v.toLocaleString('en-IN')
+    const labels = chartData.map(d => new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }))
+    const values = chartData.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
     const color = activeMetric === 'first_orders' ? colors.first_orders : colors.installs
-    new W.Chart(canvas, { type: 'line', data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: color + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: color }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx: any) => ' ' + fmtV(ctx.raw) } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { font: { size: 10 }, callback: (v: any) => fmtV(v) } } }, animation: { duration: 300 } } })
-  }, [chartLoaded, branchDaily, activeMetric])
+    new W.Chart(canvas, { type: 'line', data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: color + '15', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: color }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx: any) => ' ' + ctx.raw.toLocaleString('en-IN') } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { font: { size: 10 }, callback: (v: any) => v.toLocaleString('en-IN') } } }, animation: { duration: 300 } } })
+  }, [chartLoaded, branchDaily, branchByChannel, activeMetric, activeTrendChannel])
 
   // Derived values
   const campaigns = data?.campaigns ?? []
@@ -461,15 +473,23 @@ export default function Dashboard() {
               <span className="text-xs text-slate-400 ml-2">{range.label}</span>
               <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full font-medium ml-2">Branch · all channels</span>
             </div>
-            <div className="flex gap-1.5">
-              {([
-                { key: 'installs', label: 'Installs' },
-                { key: 'first_orders', label: 'First orders' },
-              ] as const).map(({ key, label }) => (
-                <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              {/* Channel filter tabs */}
+              <div className="flex gap-1">
+                {['All', 'Google', 'Facebook', 'Apple', 'Affiliate', 'Organic'].map(ch => (
+                  <button key={ch} onClick={() => setActiveTrendChannel(ch)} className={`text-xs px-2.5 py-1 rounded-full border cursor-pointer ${activeTrendChannel === ch ? 'bg-slate-800 text-white border-slate-800' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                    {ch}
+                  </button>
+                ))}
+              </div>
+              {/* Metric toggle */}
+              <div className="flex gap-1 border-l border-slate-200 pl-3">
+                {([{ key: 'installs', label: 'Installs' }, { key: 'first_orders', label: 'First orders' }] as const).map(({ key, label }) => (
+                  <button key={key} onClick={() => setActiveMetric(key)} className={`text-xs px-3 py-1 rounded-full border cursor-pointer ${activeMetric === key ? 'bg-blue-900 text-blue-50 border-blue-900' : 'bg-transparent text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div style={{ position: 'relative', height: '180px' }}>
@@ -482,12 +502,13 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
             <div className="flex gap-6">
               {(() => {
-                const vals = branchDaily.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
+                const activeData = activeTrendChannel === 'All' ? branchDaily : (branchByChannel[activeTrendChannel.toLowerCase()] || branchByChannel[activeTrendChannel] || branchDaily)
+                const vals = activeData.map(d => activeMetric === 'first_orders' ? d.first_orders : d.installs)
                 const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
                 const peak = vals.length ? Math.max(...vals) : 0
-                const peakDate = branchDaily[vals.indexOf(peak)]?.date
+                const peakDate = activeData[vals.indexOf(peak)]?.date
                 const low = vals.length ? Math.min(...vals) : 0
-                const lowDate = branchDaily[vals.indexOf(low)]?.date
+                const lowDate = activeData[vals.indexOf(low)]?.date
                 const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
                 return <>
                   <div><div className="text-xs text-slate-400">Avg daily</div><div className="text-sm font-semibold text-slate-700 mt-0.5">{avg.toLocaleString('en-IN')}</div></div>
