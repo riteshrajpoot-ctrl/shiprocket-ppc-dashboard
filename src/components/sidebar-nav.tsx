@@ -16,6 +16,7 @@ const NAV_ITEMS = [
     items: [
       { label: 'Meta Ads', href: '/growth-overview', icon: '⬡', badge: 'Live', badgeColor: '#065F46', badgeBg: '#D1FAE5' },
       { label: 'Branch', href: '/branch', icon: '⬢', badge: 'Beta', badgeColor: '#92400E', badgeBg: '#FEF3C7' },
+      { label: 'Affiliate', href: '/affiliate', icon: '⬡', badge: 'Beta', badgeColor: '#92400E', badgeBg: '#FEF3C7' },
       { label: 'Google Ads', href: '/google-ads', icon: '⬡', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
     ],
   },
