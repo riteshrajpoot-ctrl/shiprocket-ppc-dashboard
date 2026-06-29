@@ -190,7 +190,7 @@ export async function GET(request: Request) {
       const estimatedWasted = cannScore >= 60 ? estimatedPaid : cannScore >= 25 ? Math.round(estimatedPaid * 0.4) : 0
 
       const cannLevel = cannScore >= 60 ? 'High' : cannScore >= 25 ? 'Medium' : 'Low'
-      const cannAction = cannScore >= 60 ? 'Pause & investigate' : cannScore >= 25 ? 'Monitor closely' : 'Genuine — scale cautiously'
+      const cannAction = cannScore >= 60 ? 'Investigate & reduce clicks' : cannScore >= 25 ? 'Ask for sub-publisher data' : 'Genuine — scale cautiously'
 
       // Campaign breakdown
       const allCampaigns = new Set([
