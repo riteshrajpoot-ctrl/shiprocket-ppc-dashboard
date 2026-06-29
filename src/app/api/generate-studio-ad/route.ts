@@ -36,7 +36,7 @@ STYLE:
 Make it look like a real high-quality Meta ad ready to publish.`
 
   try {
-    // Use GPT-4o to generate with the uploaded images as reference
+    // Step 1: Ask GPT-4o to write a precise image prompt based on uploaded images
     const messages: any[] = [
       {
         role: 'user',
@@ -56,13 +56,12 @@ Make it look like a real high-quality Meta ad ready to publish.`
           }] : []),
           {
             type: 'text',
-            text: 'Based on these uploaded elements, generate a DALL-E prompt that will create this exact ad composition. Return ONLY the DALL-E prompt, nothing else.'
+            text: 'Based on these uploaded elements, generate a detailed image generation prompt that will create this exact ad composition. Return ONLY the prompt, nothing else.'
           }
         ]
       }
     ]
 
-    // Step 1: Ask GPT-4o to write a precise DALL-E prompt based on the uploaded images
     const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -71,27 +70,28 @@ Make it look like a real high-quality Meta ad ready to publish.`
     const gptData = await gptRes.json()
     if (gptData.error) return NextResponse.json({ error: gptData.error.message }, { status: 500 })
 
-    const dallePrompt = gptData.choices?.[0]?.message?.content || prompt
+    const imagePrompt = gptData.choices?.[0]?.message?.content || prompt
 
-    // Step 2: Generate the actual image with DALL-E 3
-    const dalleRes = await fetch('https://api.openai.com/v1/images/generations', {
+    // Step 2: Generate the actual image with gpt-image-1
+    // NOTE: gpt-image-1 does NOT support response_format or style params
+    // It always returns b64_json by default
+    const imageRes = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: 'dall-e-3',
-        prompt: dallePrompt,
+        model: 'gpt-image-1',
+        prompt: imagePrompt,
         n: 1,
         size,
-        response_format: 'b64_json',
-        quality: 'hd',
-        style: 'vivid',
+        quality: 'high',
+        // NO response_format — gpt-image-1 returns b64_json by default
       }),
     })
-    const dalleData = await dalleRes.json()
-    if (dalleData.error) return NextResponse.json({ error: dalleData.error.message }, { status: 500 })
+    const imageData = await imageRes.json()
+    if (imageData.error) return NextResponse.json({ error: imageData.error.message }, { status: 500 })
 
-    const image = dalleData.data?.[0]?.b64_json
-    if (!image) return NextResponse.json({ error: 'No image returned from DALL-E' }, { status: 500 })
+    const image = imageData.data?.[0]?.b64_json
+    if (!image) return NextResponse.json({ error: 'No image returned from API' }, { status: 500 })
 
     return NextResponse.json({ image })
   } catch (e: any) {
