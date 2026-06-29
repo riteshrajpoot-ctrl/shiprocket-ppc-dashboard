@@ -553,7 +553,7 @@ export default function AffiliatePage() {
             <div style={{ fontSize: 13, fontWeight: 600, color: '#92400E', marginBottom: 10 }}>How to act on this</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {[
-                { step: '1. Pause high-risk partners first', desc: 'Remove My Boors, WingAds from your affiliate program temporarily. Measure if your organic first orders increase — if they do, the cannibalization is confirmed.' },
+                { step: '1. Investigate high-risk partners first', desc: 'Contact My Boors, WingAds and ask them to explain their CTI rate. Request a sub-publisher breakdown. If they cannot explain, reduce their click quota before removing them.' },
                 { step: '2. Ask for sub-publisher breakdown', desc: 'Request campaign-level click data from the partner. Specific sub-publishers are often the bad actors, not the entire network.' },
                 { step: '3. Set CTI thresholds in Branch', desc: 'In Branch Fraud Manager, enable "Low Conversion CTI" rule with a 2% minimum. Any partner below this gets auto-blocked.' },
                 { step: '4. Negotiate incrementality test', desc: 'Run a holdout test — pause the partner for 2 weeks, compare first orders. If orders don\'t drop, they were fully cannibalizing.' },
