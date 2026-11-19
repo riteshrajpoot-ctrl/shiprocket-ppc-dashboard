@@ -114,12 +114,12 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 const fmtINR = (n: number) => n.toLocaleString('en-IN');
 const daysBetween = (a: number, b: number) => Math.max(0, Math.round((b - a) / DAY));
 
+// Built with new RegExp so the project's ES5 TypeScript target accepts the unicode ('u') flag.
+const EMOJI_RE = new RegExp('[\\p{Extended_Pictographic}\\uFE0F\\u200D]', 'gu');
+const NON_WORD_RE = new RegExp('[^\\p{L}\\p{N}₹%]+', 'gu');
+
 function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '')
-    .replace(/[^\p{L}\p{N}₹%]+/gu, ' ')
-    .trim();
+  return s.toLowerCase().replace(EMOJI_RE, '').replace(NON_WORD_RE, ' ').trim();
 }
 
 const SCRIPTS: [RegExp, string][] = [
@@ -148,7 +148,7 @@ const RUPEE_RE = /₹\s?([\d,]{3,7})/g;
 
 export function extractCodes(text: string): { code: string; detail: string }[] {
   const out: { code: string; detail: string }[] = [];
-  for (const m of text.matchAll(CODE_RE)) {
+  for (const m of Array.from(text.matchAll(CODE_RE))) {
     const code = m[1];
     if (code !== code.toUpperCase()) continue; // real codes are written in capitals
     const pct = text.match(PCT_RE);
@@ -160,7 +160,7 @@ export function extractCodes(text: string): { code: string; detail: string }[] {
 }
 
 export function extractPayouts(text: string): { amount: number; unit: 'day' | 'month' }[] {
-  const amounts = [...text.matchAll(RUPEE_RE)].map((m) => Number(m[1].replace(/,/g, ''))).filter((n) => n >= 300);
+  const amounts = Array.from(text.matchAll(RUPEE_RE)).map((m) => Number(m[1].replace(/,/g, ''))).filter((n) => n >= 300);
   // Daily payouts in these ads are around ₹1,000–1,500; monthly ones are ₹20,000+.
   const daily = amounts.filter((n) => n < 10_000);
   const monthly = amounts.filter((n) => n >= 10_000);
@@ -208,7 +208,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
   }
 
   const creatives: Creative[] = [];
-  for (const [key, g] of groups) {
+  for (const [key, g] of Array.from(groups.entries())) {
     const first = Math.min(...g.ads.map((a) => Date.parse(a.first_shown ?? report.generated_at)));
     const googleDays = Math.max(0, ...g.ads.map((a) => a.days_shown ?? 0));
     const daysLive = Math.max(daysBetween(first, reportTime), googleDays);
@@ -221,7 +221,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
       title: g.title.slice(0, 120),
       text: g.text.replace(/\s+/g, ' ').slice(0, 220),
       language: detectLanguage(g.text),
-      sources: [...new Set(g.ads.flatMap((a) => (a.source === 'google' && youtubeIds.has(a.id) ? ['google', 'youtube'] : [a.source])))],
+      sources: Array.from(new Set(g.ads.flatMap((a) => (a.source === 'google' && youtubeIds.has(a.id) ? ['google', 'youtube'] : [a.source])))),
       format: sample.format,
       cta: sample.cta,
       firstSeen: new Date(first).toISOString().slice(0, 10),
@@ -249,7 +249,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
     if (!o.detail && detail) o.detail = detail;
     offerMap.set(k, o);
   };
-  for (const [key, g] of groups) {
+  for (const [key, g] of Array.from(groups.entries())) {
     const c = creatives.find((x) => x.key === key)!;
     const firstMs = Date.parse(c.firstSeen);
     if (c.type === 'Hiring') {
@@ -260,10 +260,10 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
       for (const { code, detail } of extractCodes(g.text)) addOffer(c, 'Customer offer', code, detail, firstMs);
     }
   }
-  const offers: Offer[] = [...offerMap.values()]
+  const offers: Offer[] = Array.from(offerMap.values())
     .map(({ _first, _langs, ...o }) => ({
       ...o,
-      languages: [..._langs],
+      languages: Array.from(_langs),
       firstSeen: new Date(_first).toISOString().slice(0, 10),
       daysLive: daysBetween(_first, reportTime),
       isNew: _first >= windowStart,
@@ -288,7 +288,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
         newCreatives: mine.filter((x) => x.isNew).length,
         hiringCreatives: mine.filter((x) => x.type === 'Hiring').length,
         longRunners: mine.filter((x) => x.isLongRunner).length,
-        languages: [...new Set(mine.map((x) => x.language))],
+        languages: Array.from(new Set(mine.map((x) => x.language))),
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -317,7 +317,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
     const name = comp.name;
     const newPayouts = offers.filter((o) => o.competitor === name && o.kind === 'Rider payout' && o.isNew);
     if (newPayouts.length) {
-      const langs = [...new Set(newPayouts.flatMap((o) => o.languages))];
+      const langs = Array.from(new Set(newPayouts.flatMap((o) => o.languages)));
       signals.push({
         competitor: name, kind: 'Hiring push', priority: 'Act',
         headline: `New rider hiring ads: ${newPayouts.map((o) => o.label.toLowerCase()).join(', ')}`,
@@ -336,7 +336,7 @@ export function analyze(report: RawReport, opts: { maxCreativesPerCompetitor?: n
       signals.push({
         competitor: name, kind: 'Creative burst', priority: 'Watch',
         headline: `${fresh.length} new creatives this week`,
-        detail: `Including “${[...new Set(fresh.sort((a, b) => b.versions - a.versions).map((c) => c.title))].slice(0, 3).join('”, “')}”.`,
+        detail: `Including “${Array.from(new Set(fresh.sort((a, b) => b.versions - a.versions).map((c) => c.title))).slice(0, 3).join('”, “')}”.`,
       });
     }
     // Meta's most-viewed rank is per competitor page, so it only means something for advertisers with real volume.
