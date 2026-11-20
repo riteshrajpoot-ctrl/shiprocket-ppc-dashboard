@@ -1,7 +1,9 @@
 import { unstable_cache } from 'next/cache';
 import { scoreAds, type AdFatigue, type AdInfo, type DailyRow } from './score';
+import type { DayTotal } from './insights';
 
 export * from './score';
+export * from './insights';
 
 const META_ACCOUNT_ID = 'act_596746546417726'; // Shiprocket Quick, same as the other Meta routes
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -13,6 +15,7 @@ export type FatigueReport = {
   windowEnd: string;
   fetchedAt: string;
   ads: AdFatigue[];
+  days: DayTotal[]; // daily account totals per side, for week-on-week alarms
 };
 
 const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -130,7 +133,8 @@ async function buildReport(): Promise<FatigueReport> {
   const recentIds: string[] = [];
   const seen: Record<string, boolean> = {};
   daily.forEach((r: any) => {
-    if (r.date_start >= recentStart && Number(r.impressions) > 0 && !seen[r.ad_id]) { seen[r.ad_id] = true; recentIds.push(r.ad_id); }
+    // Last 14 days, so both weeks of the week-on-week comparison get the right Supply/Demand label.
+    if (r.date_start >= ymd(endMs - 13 * DAY) && Number(r.impressions) > 0 && !seen[r.ad_id]) { seen[r.ad_id] = true; recentIds.push(r.ad_id); }
   });
   const [details, lifetime] = await Promise.all([fetchAdDetails(token, recentIds), fetchLifetime(token, recentIds)]);
 
@@ -150,8 +154,17 @@ async function buildReport(): Promise<FatigueReport> {
     }
   });
 
-  return { windowStart, windowEnd, fetchedAt: new Date().toISOString(), ads: scoreAds(rows, info, frequency7, windowStart, windowEnd) };
+  const totals: Record<string, DayTotal> = {};
+  rows.forEach((r) => {
+    const side = info[r.adId]?.side || 'Demand';
+    const k = r.date + '|' + side;
+    const t = totals[k] || (totals[k] = { date: r.date, side, spend: 0, impressions: 0, clicks: 0, installs: 0 });
+    t.spend += r.spend; t.impressions += r.impressions; t.clicks += r.clicks; t.installs += r.installs;
+  });
+  const days = Object.keys(totals).map((k) => totals[k]);
+
+  return { windowStart, windowEnd, fetchedAt: new Date().toISOString(), ads: scoreAds(rows, info, frequency7, windowStart, windowEnd), days };
 }
 
 // Recomputed at most every 3 hours, or when someone clicks Refresh.
-export const getFatigueReport = unstable_cache(buildReport, ['creative-fatigue-v1'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] });
+export const getFatigueReport = unstable_cache(buildReport, ['creative-fatigue-v2'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] });
