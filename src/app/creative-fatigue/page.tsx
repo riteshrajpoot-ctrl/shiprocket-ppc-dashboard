@@ -61,44 +61,49 @@ function Delta({ pct, goodWhenUp }: { pct: number | null; goodWhenUp: boolean })
 function CreativeMap({ ads }: { ads: AdVerdict[] }) {
   const pts = ads.filter((a) => a.cpiVsMedian !== null && a.spend7 > 0);
   if (pts.length < 3) return <p className="text-sm text-slate-500">Not enough ads with installs to plot yet.</p>;
-  const W = 760, H = 320, L = 48, Rm = 16, T = 16, B = 40;
+  const W = 820, H = 360, L = 56, Rm = 20, T = 12, B = 40;
   const maxX = Math.max(...pts.map((a) => a.spend7)) * 1.05;
-  const maxY = 3;
+  // y runs from -0.35 to 3.35 so the corner labels sit in bands that dots (0 to 3x) never reach
+  const yMin = -0.35, yMax = 3.35, capY = 3;
   const x = (v: number) => L + (v / maxX) * (W - L - Rm);
-  const y = (v: number) => T + (1 - Math.min(v, maxY) / maxY) * (H - T - B);
+  const y = (v: number) => T + (1 - (Math.min(v, capY) - yMin) / (yMax - yMin)) * (H - T - B);
   const midX = x(maxX / 2);
-  const labelled = pts.slice().sort((a, b) => b.spend7 - a.spend7).slice(0, 5).map((a) => a.adId);
+  const labelled = pts.slice().sort((a, b) => b.spend7 - a.spend7).slice(0, 6).map((a) => a.adId);
+  const halo = { paintOrder: 'stroke' as const, stroke: '#ffffff', strokeWidth: 4, strokeLinejoin: 'round' as const };
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Scatter of ads by 7-day spend and CPI relative to the median">
       <rect x={L} y={T} width={midX - L} height={y(1) - T} fill="#fef2f2" />
       <rect x={midX} y={T} width={W - Rm - midX} height={y(1) - T} fill="#fee2e2" />
       <rect x={L} y={y(1)} width={midX - L} height={H - B - y(1)} fill="#f0fdf4" />
       <rect x={midX} y={y(1)} width={W - Rm - midX} height={H - B - y(1)} fill="#ecfdf5" />
-      <text x={L + 8} y={T + 16} fontSize="11" fill="#991b1b">Small and costly: fix or drop</text>
-      <text x={W - Rm - 8} y={T + 16} fontSize="11" fill="#991b1b" textAnchor="end">Money leaks: cut first</text>
-      <text x={L + 8} y={H - B - 8} fontSize="11" fill="#166534">Hidden winners: scale up</text>
-      <text x={W - Rm - 8} y={H - B - 8} fontSize="11" fill="#166534" textAnchor="end">Workhorses: protect, prepare backups</text>
+      <text x={L + 8} y={T + 14} fontSize="11" fontWeight="600" fill="#991b1b">Small and costly: fix or drop</text>
+      <text x={W - Rm - 8} y={T + 14} fontSize="11" fontWeight="600" fill="#991b1b" textAnchor="end">Money leaks: cut first</text>
+      <text x={L + 8} y={H - B - 8} fontSize="11" fontWeight="600" fill="#166534">Hidden winners: scale up</text>
+      <text x={W - Rm - 8} y={H - B - 8} fontSize="11" fontWeight="600" fill="#166534" textAnchor="end">Workhorses: protect, prepare backups</text>
       <line x1={L} x2={W - Rm} y1={y(1)} y2={y(1)} stroke="#64748b" strokeDasharray="4 4" />
-      <text x={L - 6} y={y(1) + 4} fontSize="10" fill="#475569" textAnchor="end">median</text>
-      <text x={L - 6} y={y(3) + 4} fontSize="10" fill="#475569" textAnchor="end">3×</text>
-      <text x={L - 6} y={y(2) + 4} fontSize="10" fill="#475569" textAnchor="end">2×</text>
-      <text x={L - 6} y={y(0) + 4} fontSize="10" fill="#475569" textAnchor="end">0</text>
+      <text x={L - 8} y={y(1) + 4} fontSize="10" fill="#475569" textAnchor="end">median</text>
+      <text x={L - 8} y={y(3) + 4} fontSize="10" fill="#475569" textAnchor="end">3×+</text>
+      <text x={L - 8} y={y(2) + 4} fontSize="10" fill="#475569" textAnchor="end">2×</text>
+      <text x={L - 8} y={y(0) + 4} fontSize="10" fill="#475569" textAnchor="end">0</text>
       <line x1={L} x2={W - Rm} y1={H - B} y2={H - B} stroke="#cbd5e1" />
       <text x={L} y={H - B + 16} fontSize="10" fill="#475569">₹0</text>
       <text x={W - Rm} y={H - B + 16} fontSize="10" fill="#475569" textAnchor="end">{inr(maxX)}</text>
-      <text x={(L + W) / 2} y={H - 6} fontSize="11" fill="#475569" textAnchor="middle">Spend, last 7 days →</text>
+      <text x={(L + W) / 2} y={H - 8} fontSize="11" fill="#475569" textAnchor="middle">Spend, last 7 days →</text>
       {pts.map((a) => (
-        <g key={a.adId}>
-          <circle cx={x(a.spend7)} cy={y(a.cpiVsMedian as number)} r={7} fill={vstyle(a.verdict).dot} fillOpacity={0.85} stroke="#fff" strokeWidth={1.5}>
-            <title>{`${a.adName}\n${a.verdict}: ${a.why}\n${inr(a.spend7)} · ${a.installs7} installs · CPI ${a.cpi7 !== null ? inr(a.cpi7) : '—'} (${a.cpiVsMedian}× median)`}</title>
-          </circle>
-          {labelled.indexOf(a.adId) >= 0 && (
-            <text x={x(a.spend7) + 10} y={y(a.cpiVsMedian as number) + 4} fontSize="10" fill="#0f172a">
-              {a.adName.length > 28 ? a.adName.slice(0, 27) + '…' : a.adName}
-            </text>
-          )}
-        </g>
+        <circle key={a.adId} cx={x(a.spend7)} cy={y(a.cpiVsMedian as number)} r={7} fill={vstyle(a.verdict).dot} fillOpacity={0.9} stroke="#fff" strokeWidth={1.5}>
+          <title>{`${a.adName}\n${a.verdict}: ${a.why}\n${inr(a.spend7)} · ${a.installs7} installs · CPI ${a.cpi7 !== null ? inr(a.cpi7) : '—'} (${a.cpiVsMedian}× median)`}</title>
+        </circle>
       ))}
+      {pts.filter((a) => labelled.indexOf(a.adId) >= 0).map((a) => {
+        const cx = x(a.spend7);
+        const right = cx > W * 0.62; // near the right edge: put the label on the left of the dot
+        const name = a.adName.length > 26 ? a.adName.slice(0, 25) + '…' : a.adName;
+        return (
+          <text key={a.adId + '-l'} x={right ? cx - 11 : cx + 11} y={y(a.cpiVsMedian as number) + 4} fontSize="10.5" fill="#0f172a" textAnchor={right ? 'end' : 'start'} style={halo}>
+            {name}
+          </text>
+        );
+      })}
     </svg>
   );
 }
@@ -196,7 +201,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         ) : (
           <ul className="grid gap-3 md:grid-cols-2">
             {ins.alarms.map((a, i) => (
-              <li key={i} className={`flex flex-col gap-1.5 rounded-lg border p-4 ${LEVEL[a.level]}`}>
+              <li key={i} className={`flex min-w-0 flex-col gap-1.5 break-words rounded-lg border p-4 ${LEVEL[a.level]}`}>
                 <span className={`self-start rounded px-2 py-0.5 text-xs font-semibold ${LEVEL_CHIP[a.level]}`}>{a.level}</span>
                 <p className="font-semibold leading-snug">{a.title}</p>
                 <p className="text-sm opacity-90">{a.detail}</p>
@@ -217,7 +222,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
             {ins.recommendations.map((r, i) => (
               <li key={i} className="flex gap-3 rounded-lg border border-slate-200 bg-white p-4">
                 <span className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-slate-900 text-sm font-semibold text-white">{i + 1}</span>
-                <div className="flex flex-col gap-1">
+                <div className="flex min-w-0 flex-col gap-1 break-words">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded px-2 py-0.5 text-xs font-semibold ${VERB_CHIP[r.verb]}`}>{r.verb}</span>
                     <span className="font-semibold">{r.title}</span>
@@ -270,18 +275,18 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
           ))}
         </nav>
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full min-w-[1150px] text-sm">
+          <table className="w-full min-w-[1400px] table-fixed text-sm">
             <thead className="text-left text-xs text-slate-500">
               <tr className="border-b border-slate-200">
-                <th className="px-4 py-2.5 font-medium">Ad</th>
-                <th className="px-4 py-2.5 font-medium">Verdict and why</th>
-                <th className="px-4 py-2.5 font-medium">Launched</th>
-                <th className="px-4 py-2.5 text-right font-medium">Last 7 days</th>
-                <th className="px-4 py-2.5 text-right font-medium">CPI vs peers</th>
-                <th className="px-4 py-2.5 text-right font-medium">Lifetime</th>
-                <th className="px-4 py-2.5 text-right font-medium">CTR first wk → now</th>
-                <th className="px-4 py-2.5 text-right font-medium">Freq 7d</th>
-                <th className="px-4 py-2.5 font-medium">Fatigue</th>
+                <th className="w-[15rem] px-4 py-2.5 font-medium">Ad</th>
+                <th className="w-[15rem] px-4 py-2.5 font-medium">Verdict and why</th>
+                <th className="w-[8rem] px-4 py-2.5 font-medium">Launched</th>
+                <th className="w-[10rem] px-4 py-2.5 text-right font-medium">Last 7 days</th>
+                <th className="w-[7rem] px-4 py-2.5 text-right font-medium">CPI vs peers</th>
+                <th className="w-[11rem] px-4 py-2.5 text-right font-medium">Lifetime</th>
+                <th className="w-[9rem] px-4 py-2.5 text-right font-medium">CTR first wk → now</th>
+                <th className="w-[5rem] px-4 py-2.5 text-right font-medium">Freq 7d</th>
+                <th className="w-[8rem] px-4 py-2.5 font-medium">Fatigue</th>
               </tr>
             </thead>
             <tbody>
@@ -289,22 +294,22 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                 <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-500">No ads in this view.</td></tr>
               ) : list.map((a) => (
                 <tr key={a.adId} className="border-b border-slate-100 align-top last:border-0">
-                  <td className="max-w-[16rem] px-4 py-2.5">
-                    <p className="font-medium">{a.adName}</p>
-                    <p className="text-xs text-slate-500">{a.campaignName}</p>
+                  <td className="px-4 py-2.5">
+                    <p className="break-all font-medium">{a.adName}</p>
+                    <p className="break-all text-xs text-slate-500">{a.campaignName}</p>
                   </td>
-                  <td className="max-w-[17rem] px-4 py-2.5">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${vstyle(a.verdict).chip}`}>{a.verdict}</span>
-                    <p className="mt-1 text-xs text-slate-600">{a.why}</p>
+                  <td className="px-4 py-2.5">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${vstyle(a.verdict).chip}`}>{a.verdict}</span>
+                    <p className="mt-1.5 break-words text-xs leading-relaxed text-slate-600">{a.why}</p>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5">
+                  <td className="px-4 py-2.5">
                     {a.launchDate ? (<><p>{dayYear(a.launchDate)}</p><p className="text-xs text-slate-500">{ageLabel(a.ageDays)} old</p></>) : '—'}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-4 py-2.5 text-right tabular-nums">
                     <p>{inr(a.spend7)}</p>
                     <p className="text-xs text-slate-500">{a.installs7} installs · CPI {a.cpi7 !== null ? inr(a.cpi7) : '—'}</p>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-4 py-2.5 text-right tabular-nums">
                     {a.cpiVsMedian !== null ? (
                       <span className={a.cpiVsMedian >= VERDICT_RULES.watchCpiRatio ? 'font-semibold text-red-700' : a.cpiVsMedian <= VERDICT_RULES.scaleCpiRatio ? 'font-semibold text-emerald-700' : ''}>
                         {a.cpiVsMedian}×
@@ -312,15 +317,15 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                     ) : '—'}
                     {a.peerMedianCpi !== null && <p className="text-xs text-slate-500">median {inr(a.peerMedianCpi)}</p>}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-4 py-2.5 text-right tabular-nums">
                     {a.lifetimeSpend !== null ? (<><p>{inr(a.lifetimeSpend)}</p><p className="text-xs text-slate-500">{a.lifetimeInstalls} installs · CPI {a.lifetimeCpi !== null ? inr(a.lifetimeCpi) : '—'}</p></>) : '—'}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-4 py-2.5 text-right tabular-nums">
                     {a.ctrBase !== null && a.ctrNow !== null ? `${a.ctrBase}% → ${a.ctrNow}%` : '—'}
                     {a.ctrChangePct !== null && <p className={`text-xs ${a.ctrChangePct < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{signed(a.ctrChangePct)}</p>}
                   </td>
                   <td className={`px-4 py-2.5 text-right tabular-nums ${(a.frequency7 ?? 0) >= VERDICT_RULES.highFrequency ? 'font-semibold text-red-700' : ''}`}>{a.frequency7 ?? '—'}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-xs">
+                  <td className="px-4 py-2.5 text-xs">
                     <p className="font-medium">{a.stage}{a.score !== null ? ` · ${a.score}` : ''}</p>
                     {a.fatigueInDays !== null && <p className={a.fatigueInDays <= VERDICT_RULES.forecastDays ? 'text-red-700' : 'text-slate-500'}>tires in ~{a.fatigueInDays} days</p>}
                   </td>
