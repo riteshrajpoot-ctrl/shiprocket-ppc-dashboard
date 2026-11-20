@@ -37,11 +37,6 @@ const VERB_CHIP: Record<string, string> = {
   Refresh: 'bg-orange-100 text-orange-900', Launch: 'bg-violet-100 text-violet-800', Consolidate: 'bg-slate-100 text-slate-700',
 };
 
-const SIDES = [
-  { key: 'all', label: 'All ads' },
-  { key: 'Demand', label: 'Demand (Quick Delivery)' },
-  { key: 'Supply', label: 'Supply (Quick Partner)' },
-];
 const SORTS = [
   { key: 'urgent', label: 'Most urgent' },
   { key: 'spend', label: 'Highest spend (7d)' },
@@ -108,7 +103,7 @@ function CreativeMap({ ads }: { ads: AdVerdict[] }) {
   );
 }
 
-export default async function CreativeFatiguePage({ searchParams }: { searchParams: { v?: string; side?: string; sort?: string } }) {
+export default async function CreativeFatiguePage({ searchParams }: { searchParams: { v?: string; sort?: string } }) {
   let data: FatigueReport;
   try {
     data = await getFatigueReport();
@@ -128,10 +123,9 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
     );
   }
 
-  const side = (SIDES.some((s) => s.key === searchParams.side) ? searchParams.side : 'all') as 'all' | 'Supply' | 'Demand';
   const vf = VERDICTS.some((v) => v.key === searchParams.v) ? (searchParams.v as Verdict) : null;
   const sort = SORTS.some((s) => s.key === searchParams.sort) ? searchParams.sort! : 'urgent';
-  const ins = buildInsights(data.ads, data.days, data.windowEnd, side);
+  const ins = buildInsights(data.ads, data.days, data.windowEnd);
   const order = VERDICTS.map((v) => v.key);
   const age = (a: AdVerdict) => (a.ageDays === null ? -1 : a.ageDays);
   const list = ins.ads
@@ -143,8 +137,8 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         : sort === 'newest' ? age(a) - age(b)
         : order.indexOf(a.verdict) - order.indexOf(b.verdict) || b.spend7 - a.spend7);
   const count = (v: Verdict) => ins.ads.filter((a) => a.verdict === v).length;
-  const link = (v: string | null, sd: string, so: string = sort) =>
-    `/creative-fatigue?${new URLSearchParams({ ...(v ? { v } : {}), side: sd, sort: so }).toString()}#ads`;
+  const link = (v: string | null, so: string = sort) =>
+    `/creative-fatigue?${new URLSearchParams({ ...(v ? { v } : {}), sort: so }).toString()}#ads`;
   const tw = ins.thisWeek;
 
   return (
@@ -161,14 +155,6 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         </form>
       </header>
 
-      <nav aria-label="Side" className="flex flex-wrap gap-1.5">
-        {SIDES.map((s) => (
-          <Link key={s.key} href={link(vf, s.key)}
-            className={`rounded-md border px-3 py-1.5 text-sm ${s.key === side ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}>
-            {s.label}
-          </Link>
-        ))}
-      </nav>
 
       {/* Verdict */}
       <section className="flex flex-col gap-4">
@@ -268,7 +254,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
           <nav aria-label="Sort" className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-slate-500">Sort:</span>
             {SORTS.map((s) => (
-              <Link key={s.key} href={link(vf, side, s.key)}
+              <Link key={s.key} href={link(vf, s.key)}
                 className={`rounded-full border px-2.5 py-1 ${s.key === sort ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}>
                 {s.label}
               </Link>
@@ -277,7 +263,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         </div>
         <nav aria-label="Verdict" className="flex flex-wrap gap-1.5">
           {VERDICTS.map((v) => (
-            <Link key={v.key} href={link(vf === v.key ? null : v.key, side)} title={v.note}
+            <Link key={v.key} href={link(vf === v.key ? null : v.key)} title={v.note}
               className={`rounded-full border px-3 py-1 text-xs font-medium ${vf === v.key ? 'border-slate-900 ring-1 ring-slate-900' : 'border-transparent'} ${v.chip}`}>
               {v.key} · {count(v.key)}
             </Link>
@@ -305,7 +291,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                 <tr key={a.adId} className="border-b border-slate-100 align-top last:border-0">
                   <td className="max-w-[16rem] px-4 py-2.5">
                     <p className="font-medium">{a.adName}</p>
-                    <p className="text-xs text-slate-500">{a.side} · {a.campaignName}</p>
+                    <p className="text-xs text-slate-500">{a.campaignName}</p>
                   </td>
                   <td className="max-w-[17rem] px-4 py-2.5">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${vstyle(a.verdict).chip}`}>{a.verdict}</span>
@@ -346,7 +332,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
       </section>
 
       <footer className="border-t border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
-        How verdicts work: each ad’s 7-day CPI is compared with the median of its side (Supply or Demand). Cut = CPI {VERDICT_RULES.cutCpiRatio}×
+        How verdicts work: each ad’s 7-day CPI is compared with the median CPI of all live ads in this account. Cut = CPI {VERDICT_RULES.cutCpiRatio}×
         the median with {inr(VERDICT_RULES.cutMinSpend7)}+ spend, zero installs on real spend, or fatigue score {RULES.stages.dead}+. Refresh = fatigue score{' '}
         {RULES.stages.fatigued}+. Scale = CPI {VERDICT_RULES.scaleCpiRatio}× the median or lower, {VERDICT_RULES.scaleMinInstalls7}+ installs and frequency under{' '}
         {VERDICT_RULES.scaleMaxFrequency}. Watch = slipping, costlier than peers ({VERDICT_RULES.watchCpiRatio}×+), or forecast to tire within{' '}
