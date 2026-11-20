@@ -1,222 +1,219 @@
-// Turns scored ads into verdicts, alarms and a ranked action list.
-// Pure functions, ES5-safe.
-import type { AdFatigue } from './score';
+// Creative fatigue scoring. Pure functions: no network, no Next.js imports.
+// Written to compile with the project's ES5 TypeScript target (no Set/Map spreads, no 'u' regex flag).
 
-export type DayTotal = { date: string; side: 'Supply' | 'Demand'; spend: number; impressions: number; clicks: number; installs: number };
-export type Verdict = 'Cut' | 'Refresh' | 'Scale' | 'Watch' | 'Keep' | 'Learning' | 'Low delivery';
-export type AdVerdict = AdFatigue & { verdict: Verdict; why: string; peerMedianCpi: number | null; cpiVsMedian: number | null };
-export type Alarm = { level: 'Critical' | 'Warning' | 'Watch'; title: string; detail: string; action: string };
-export type Recommendation = { verb: 'Cut' | 'Shift budget' | 'Scale' | 'Refresh' | 'Launch' | 'Consolidate'; title: string; detail: string; impact: string };
-export type Week = { spend: number; installs: number; impressions: number; clicks: number; cpi: number | null; ctr: number | null };
-export type Insights = {
-  ads: AdVerdict[];
-  thisWeek: Week;
-  lastWeek: Week;
-  change: { spendPct: number | null; installsPct: number | null; cpiPct: number | null; ctrPct: number | null };
-  wasted7: number;
-  alarms: Alarm[];
-  recommendations: Recommendation[];
-  headline: string;
+export type DailyRow = {
+  adId: string;
+  date: string; // YYYY-MM-DD
+  impressions: number;
+  clicks: number;
+  spend: number;
+  installs: number;
 };
 
-export const VERDICT_RULES = {
-  cutCpiRatio: 1.8, // CPI at least 1.8x the median of its side
-  cutMinSpend7: 1000, // ...and at least ₹1,000 spent in 7 days
-  scaleCpiRatio: 0.75, // CPI at most 0.75x the median
-  scaleMinInstalls7: 10,
-  scaleMaxFrequency: 2.5,
-  watchCpiRatio: 1.3,
-  minInstallsForCpi: 5,
-  concentrationShare: 0.4, // one ad carrying 40%+ of spend
-  staleLaunchDays: 21, // no new creative for 3 weeks
-  forecastDays: 7, // alarm if an ad is forecast to tire within a week
-  highFrequency: 3,
+export type AdInfo = {
+  adId: string;
+  adName: string;
+  adsetId: string;
+  adsetName: string;
+  campaignName: string;
+  side: 'Supply' | 'Demand';
+  launchDate: string | null; // when the ad was created in Ads Manager (YYYY-MM-DD)
+  lifetime: { spend: number; impressions: number; clicks: number; installs: number } | null; // since launch
+};
+
+export type Stage = 'Fresh' | 'Watch' | 'Fatigued' | 'Dead' | 'Auction shift' | 'Too new' | 'Too little data';
+
+export type AdFatigue = AdInfo & {
+  stage: Stage;
+  score: number | null; // 0–100, higher = more tired
+  firstDay: string;
+  daysLive: number; // days with data inside our 35-day window
+  ageDays: number | null; // days since launch, up to the end of the window
+  installs7: number;
+  cpi7: number | null;
+  lifetimeSpend: number | null;
+  lifetimeInstalls: number | null;
+  lifetimeCpi: number | null;
+  lifetimeCtr: number | null; // %
+  olderThanWindow: boolean; // started before our data window, so the baseline is the earliest week we have
+  spend7: number;
+  impressions7: number;
+  ctrBase: number | null; // %
+  ctrNow: number | null; // %
+  ctrChangePct: number | null;
+  frequency7: number | null;
+  cpmChangePct: number | null;
+  cpiBase: number | null;
+  cpiNow: number | null;
+  cpiChangePct: number | null;
+  reasons: string[];
+  action: string;
+  ctrTrendPerDay: number | null; // CTR points per day over the last 14 days
+  fatigueInDays: number | null; // at the current CTR trend, days until CTR is 30% below its first week
+};
+
+// Starting values from the Smart Alarms plan; tune after 2–3 weeks of silent mode.
+export const RULES = {
+  weights: { ctr: 0.4, frequency: 0.25, cpi: 0.2, cpm: 0.15 },
+  ctrDropForFull: 0.4, // a 40% CTR drop scores the CTR signal at 100%
+  frequencyLow: 1.5, // 7-day frequency where the signal starts
+  frequencyHigh: 4, // 7-day frequency where the signal is full
+  costRiseForFull: 0.5, // +50% CPI or CPM scores that signal at 100%
+  minImpressions: 2000, // per window, so small numbers don't trigger alarms
+  minInstalls: 5, // per window, before CPI is used
+  minDaysToJudge: 14, // a first week to compare against plus a recent week
+  activeWithinDays: 3, // ads with no impressions in the last 3 days are treated as stopped
+  stages: { watch: 25, fatigued: 50, dead: 75 },
+  auctionShiftCtrDrop: 0.2, // if every ad in an ad set dropped this much, blame the market
 };
 
 const DAY = 86400000;
 const toMs = (d: string) => Date.parse(d + 'T00:00:00Z');
-const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
-const pctChange = (now: number | null, prev: number | null) =>
-  now === null || prev === null || prev === 0 ? null : Math.round((now / prev - 1) * 1000) / 10;
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+const pct = (now: number, base: number) => (base > 0 ? Math.round((now / base - 1) * 1000) / 10 : null);
 
-function median(xs: number[]): number | null {
-  if (!xs.length) return null;
-  const s = xs.slice().sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+function sum(rows: DailyRow[]) {
+  let impressions = 0, clicks = 0, spend = 0, installs = 0;
+  for (const r of rows) { impressions += r.impressions; clicks += r.clicks; spend += r.spend; installs += r.installs; }
+  return { impressions, clicks, spend, installs };
 }
 
-function week(days: DayTotal[], fromMs: number, toMsIncl: number): Week {
-  let spend = 0, installs = 0, impressions = 0, clicks = 0;
-  days.forEach((d) => {
-    const t = toMs(d.date);
-    if (t >= fromMs && t <= toMsIncl) { spend += d.spend; installs += d.installs; impressions += d.impressions; clicks += d.clicks; }
-  });
-  return {
-    spend: Math.round(spend), installs, impressions, clicks,
-    cpi: installs ? Math.round(spend / installs) : null,
-    ctr: impressions ? Math.round((clicks / impressions) * 10000) / 100 : null,
-  };
-}
+const ACTIONS: Record<Stage, string> = {
+  Fresh: 'No action needed.',
+  Watch: 'Prepare a fresh variant now so it is ready next week.',
+  Fatigued: 'Refresh it: new hook or visual, keep the offer. Use the top Playbook angle.',
+  Dead: 'Pause it and replace it with a new creative.',
+  'Auction shift': 'Every ad in this ad set dropped together. Check bids, budget and competitor activity before changing creatives.',
+  'Too new': 'Live under 14 days. Judged once it has a first week and a recent week.',
+  'Too little data': 'Not enough impressions to judge fairly yet.',
+};
 
-const listNames = (ads: AdVerdict[], n = 3) =>
-  ads.slice(0, n).map((a) => `“${a.adName}”`).join(', ') + (ads.length > n ? ` and ${ads.length - n} more` : '');
-
-// This Meta account now runs Quick Delivery (customer) ads only; Quick Partner moved to its own account.
-export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: string): Insights {
-  const R = VERDICT_RULES;
-
-  // Peer median CPI: each ad is judged against the other live ads in the account.
-  const med = median(ads0.filter((a) => a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null).map((a) => a.cpi7 as number));
-
-  const ads: AdVerdict[] = ads0.map((a) => {
-    let ratio: number | null = null;
-    if (med && a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null) ratio = Math.round((a.cpi7 / med) * 100) / 100;
-    const zeroInstallBurn = med !== null && a.installs7 === 0 && a.spend7 >= Math.max(500, 1.5 * med);
-    const freq = a.frequency7 ?? 0;
-    let verdict: Verdict = 'Keep';
-    let why = 'Steady: cost in line with peers and no sign of fatigue.';
-
-    if (a.stage === 'Too new') {
-      verdict = 'Learning'; why = 'Under 14 days old: let it learn before judging.';
-    } else if (a.stage === 'Dead') {
-      verdict = 'Cut'; why = 'Fatigue score 75+: CTR has collapsed and costs are rising.';
-    } else if (zeroInstallBurn) {
-      verdict = 'Cut'; why = `${inr(a.spend7)} spent in 7 days with zero installs.`;
-    } else if (ratio !== null && ratio >= R.cutCpiRatio && a.spend7 >= R.cutMinSpend7) {
-      verdict = 'Cut'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the median (${inr(med as number)}).`;
-    } else if (a.stage === 'Fatigued') {
-      verdict = 'Refresh'; why = 'Fatigue score 50+: the audience has seen it too often.';
-    } else if (ratio !== null && ratio <= R.scaleCpiRatio && a.installs7 >= R.scaleMinInstalls7 && freq < R.scaleMaxFrequency && a.stage !== 'Watch') {
-      verdict = 'Scale'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the median with room to grow (frequency ${a.frequency7 ?? '—'}).`;
-    } else if (a.stage === 'Watch' || a.stage === 'Auction shift' || (a.fatigueInDays !== null && a.fatigueInDays <= R.forecastDays) || (ratio !== null && ratio >= R.watchCpiRatio)) {
-      verdict = 'Watch';
-      why = a.stage === 'Auction shift' ? 'Whole ad set dropped together: likely bids, budget or competition.'
-        : a.fatigueInDays !== null && a.fatigueInDays <= R.forecastDays ? `CTR falling; forecast to tire in about ${a.fatigueInDays} days.`
-        : ratio !== null && ratio >= R.watchCpiRatio ? `CPI ${ratio}× the median: costlier than peers.`
-        : 'Starting to slip versus its first week.';
-    } else if (a.stage === 'Too little data') {
-      verdict = 'Low delivery'; why = 'Too few impressions to learn from; Meta is barely delivering it.';
-    }
-    return { ...a, verdict, why, peerMedianCpi: med, cpiVsMedian: ratio };
-  });
-
-  // Week on week, from daily totals.
+export function scoreAds(
+  rows: DailyRow[],
+  info: Record<string, AdInfo>,
+  frequency7: Record<string, number>,
+  windowStart: string,
+  windowEnd: string,
+): AdFatigue[] {
   const endMs = toMs(windowEnd);
-  const thisWeek = week(days, endMs - 6 * DAY, endMs);
-  const lastWeek = week(days, endMs - 13 * DAY, endMs - 7 * DAY);
-  const change = {
-    spendPct: pctChange(thisWeek.spend, lastWeek.spend),
-    installsPct: pctChange(thisWeek.installs, lastWeek.installs),
-    cpiPct: pctChange(thisWeek.cpi, lastWeek.cpi),
-    ctrPct: pctChange(thisWeek.ctr, lastWeek.ctr),
-  };
+  const recentStartMs = endMs - 6 * DAY;
+  const activeSinceMs = endMs - (RULES.activeWithinDays - 1) * DAY;
 
-  const by = (v: Verdict) => ads.filter((a) => a.verdict === v).sort((a, b) => b.spend7 - a.spend7);
-  const cut = by('Cut'), refresh = by('Refresh'), scale = by('Scale'), low = by('Low delivery');
-  const wasted7 = cut.reduce((s, a) => s + a.spend7, 0);
-  const totalSpend7 = ads.reduce((s, a) => s + a.spend7, 0);
-
-  // ---------- Alarms ----------
-  const alarms: Alarm[] = [];
-  if (change.cpiPct !== null && change.cpiPct >= 15) {
-    alarms.push({
-      level: change.cpiPct >= 30 ? 'Critical' : 'Warning',
-      title: `Cost per install up ${change.cpiPct}% week on week`,
-      detail: `${inr(lastWeek.cpi as number)} → ${inr(thisWeek.cpi as number)} on ${inr(thisWeek.spend)} spend.`,
-      action: 'Check the Cut and Refresh ads below first; they usually explain most of the rise.',
-    });
-  }
-  if (change.installsPct !== null && change.installsPct <= -20) {
-    alarms.push({
-      level: change.installsPct <= -35 ? 'Critical' : 'Warning',
-      title: `Installs down ${Math.abs(change.installsPct)}% week on week`,
-      detail: `${lastWeek.installs.toLocaleString('en-IN')} → ${thisWeek.installs.toLocaleString('en-IN')} installs${change.spendPct !== null ? `, spend ${change.spendPct > 0 ? '+' : ''}${change.spendPct}%` : ''}.`,
-      action: 'If spend held steady, creatives are tiring; if spend fell, check budgets and pacing.',
-    });
-  }
-  if (change.ctrPct !== null && change.ctrPct <= -15) {
-    alarms.push({ level: 'Warning', title: `Account CTR down ${Math.abs(change.ctrPct)}% week on week`, detail: `${lastWeek.ctr}% → ${thisWeek.ctr}%.`, action: 'Audiences are tuning out; prioritise new hooks.' });
-  }
-  if (cut.length) {
-    alarms.push({
-      level: 'Critical',
-      title: `${inr(wasted7)} spent last week on ${cut.length} ad${cut.length > 1 ? 's' : ''} to cut`,
-      detail: `${listNames(cut)}: ${cut[0].why}`,
-      action: 'Pause them, or cut their budget by half today.',
-    });
-  }
-  const tiring = ads.filter((a) => a.verdict !== 'Cut' && a.fatigueInDays !== null && a.fatigueInDays <= R.forecastDays).sort((a, b) => (a.fatigueInDays as number) - (b.fatigueInDays as number));
-  if (tiring.length) {
-    alarms.push({
-      level: 'Warning',
-      title: `${tiring.length} ad${tiring.length > 1 ? 's' : ''} forecast to tire within a week`,
-      detail: `${listNames(tiring)}. At the current CTR trend, the first one tires in about ${tiring[0].fatigueInDays} days.`,
-      action: 'Brief replacements now so they are live before these tire.',
-    });
-  }
-  if (refresh.length) {
-    alarms.push({ level: 'Warning', title: `${refresh.length} fatigued ad${refresh.length > 1 ? 's' : ''} still spending`, detail: `${listNames(refresh)} · ${inr(refresh.reduce((s, a) => s + a.spend7, 0))} in 7 days.`, action: 'Refresh the hook or visual; keep the offer.' });
-  }
-  const top = ads.slice().sort((a, b) => b.spend7 - a.spend7)[0];
-  if (top && totalSpend7 > 0 && top.spend7 / totalSpend7 >= R.concentrationShare) {
-    const share = Math.round((top.spend7 / totalSpend7) * 100);
-    alarms.push({
-      level: 'Warning',
-      title: `One ad carries ${share}% of spend`,
-      detail: `“${top.adName}” (${inr(top.spend7)} of ${inr(totalSpend7)} in 7 days). If it tires, volume drops with it.`,
-      action: 'Get 2 backup creatives live in the same ad set this week.',
-    });
-  }
-  const launched = ads.filter((a) => a.ageDays !== null).map((a) => a.ageDays as number);
-  const newest = launched.length ? Math.min.apply(null, launched) : null;
-  if (newest !== null && newest >= R.staleLaunchDays) {
-    alarms.push({ level: 'Warning', title: `No new creative launched in ${newest} days`, detail: 'Every live ad is at least 3 weeks old, so the pipeline has gone quiet.', action: 'Launch 2–3 new creatives this week, using the top Playbook angles.' });
-  }
-  const highFreq = ads.filter((a) => (a.frequency7 ?? 0) >= R.highFrequency);
-  if (highFreq.length) {
-    alarms.push({ level: 'Watch', title: `${highFreq.length} ad${highFreq.length > 1 ? 's' : ''} seen ${R.highFrequency}+ times per person this week`, detail: listNames(highFreq) + '.', action: 'Widen the audience or rotate in a new creative.' });
-  }
-  if (low.length >= 3) {
-    alarms.push({ level: 'Watch', title: `${low.length} ads barely delivering`, detail: `${inr(low.reduce((s, a) => s + a.spend7, 0))} in 7 days spread across ads too small to learn from.`, action: 'Consolidate into fewer ads per ad set so Meta can optimise.' });
-  }
-  const rank = { Critical: 0, Warning: 1, Watch: 2 };
-  alarms.sort((a, b) => rank[a.level] - rank[b.level]);
-
-  // ---------- Recommendations ----------
-  const recs: Recommendation[] = [];
-  const scaleMed = median(scale.filter((a) => a.cpi7 !== null).map((a) => a.cpi7 as number));
-  if (cut.length) {
-    recs.push({ verb: 'Cut', title: `Pause ${cut.length} ad${cut.length > 1 ? 's' : ''}`, detail: listNames(cut, 5) + '.', impact: `Saves about ${inr(wasted7)} a week` });
-  }
-  if (cut.length && scale.length && scaleMed) {
-    const cutInstalls = cut.reduce((s, a) => s + a.installs7, 0);
-    const gained = Math.round(wasted7 / scaleMed);
-    recs.push({
-      verb: 'Shift budget',
-      title: `Move the ${inr(wasted7)} to ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`,
-      detail: `${listNames(scale)} install at a median ${inr(scaleMed)}. Raise their budgets in steps of 20–30% so CPI holds.`,
-      impact: `Roughly ${gained - cutInstalls > 0 ? '+' : ''}${(gained - cutInstalls).toLocaleString('en-IN')} installs a week (estimate; CPI usually rises a little as budget grows)`,
-    });
-  } else if (scale.length) {
-    recs.push({ verb: 'Scale', title: `Raise budget on ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`, detail: `${listNames(scale)}: CPI well below peers and frequency still low.`, impact: 'Add 20–30% budget, then re-check CPI after 3 days' });
-  }
-  const toRefresh = refresh.concat(tiring.filter((a) => a.verdict !== 'Refresh'));
-  if (toRefresh.length) {
-    recs.push({ verb: 'Refresh', title: `Brief ${toRefresh.length} replacement creative${toRefresh.length > 1 ? 's' : ''}`, detail: listNames(toRefresh) + '. Keep the angle that worked; change the hook and first 3 seconds.', impact: 'Protects volume before CTR drops further' });
-  }
-  if ((newest !== null && newest >= R.staleLaunchDays) || (top && totalSpend7 > 0 && top.spend7 / totalSpend7 >= R.concentrationShare)) {
-    recs.push({ verb: 'Launch', title: 'Launch 2–3 new creatives this week', detail: 'Test new angles from the Playbook alongside the current winner, not instead of it.', impact: 'Reduces dependence on one ad and refills the pipeline' });
-  }
-  if (low.length >= 3) {
-    recs.push({ verb: 'Consolidate', title: `Merge ${low.length} low-delivery ads`, detail: 'Keep the 2–3 strongest per ad set and pause the rest.', impact: 'Gives Meta enough data per ad to optimise' });
+  const byAd: Record<string, DailyRow[]> = {};
+  for (const r of rows) {
+    if (r.impressions <= 0) continue;
+    (byAd[r.adId] = byAd[r.adId] || []).push(r);
   }
 
-  const n = alarms.filter((a) => a.level !== 'Watch').length;
-  const headline =
-    `Last 7 days: ${inr(thisWeek.spend)} spend, ${thisWeek.installs.toLocaleString('en-IN')} installs, CPI ${thisWeek.cpi !== null ? inr(thisWeek.cpi) : '—'}` +
-    (change.cpiPct !== null ? ` (${change.cpiPct > 0 ? '+' : ''}${change.cpiPct}% vs the week before)` : '') +
-    `. ${n ? `${n} alarm${n > 1 ? 's' : ''} need attention` : 'No critical alarms'}${wasted7 ? `; ${inr(wasted7)} a week is going to ads worth cutting` : ''}.`;
+  const out: AdFatigue[] = [];
+  Object.keys(byAd).forEach((adId) => {
+    const days = byAd[adId].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const meta = info[adId];
+    if (!meta) return;
+    const lastMs = toMs(days[days.length - 1].date);
+    if (lastMs < activeSinceMs) return; // stopped ads are not part of the alarm list
 
-  return { ads, thisWeek, lastWeek, change, wasted7, alarms, recommendations: recs, headline };
+    const firstDay = days[0].date;
+    const firstMs = toMs(firstDay);
+    const daysLive = Math.round((endMs - firstMs) / DAY) + 1;
+    const baseRows = days.filter((d) => toMs(d.date) < firstMs + 7 * DAY);
+    const recentRows = days.filter((d) => toMs(d.date) >= recentStartMs);
+    const base = sum(baseRows);
+    const now = sum(recentRows);
+
+    const ctrBase = base.impressions ? (base.clicks / base.impressions) * 100 : null;
+    const ctrNow = now.impressions ? (now.clicks / now.impressions) * 100 : null;
+    const cpmBase = base.impressions ? (base.spend / base.impressions) * 1000 : null;
+    const cpmNow = now.impressions ? (now.spend / now.impressions) * 1000 : null;
+    const cpiOk = base.installs >= RULES.minInstalls && now.installs >= RULES.minInstalls;
+    const cpiBase = cpiOk ? base.spend / base.installs : null;
+    const cpiNow = cpiOk ? now.spend / now.installs : null;
+    const freq = frequency7[adId] ?? null;
+
+    const ad: AdFatigue = {
+      ...meta,
+      stage: 'Fresh',
+      score: null,
+      firstDay,
+      daysLive,
+      ageDays: meta.launchDate ? Math.max(0, Math.round((endMs - toMs(meta.launchDate)) / DAY)) : null,
+      installs7: now.installs,
+      cpi7: now.installs ? Math.round(now.spend / now.installs) : null,
+      lifetimeSpend: meta.lifetime ? Math.round(meta.lifetime.spend) : null,
+      lifetimeInstalls: meta.lifetime ? meta.lifetime.installs : null,
+      lifetimeCpi: meta.lifetime && meta.lifetime.installs ? Math.round(meta.lifetime.spend / meta.lifetime.installs) : null,
+      lifetimeCtr: meta.lifetime && meta.lifetime.impressions ? Math.round((meta.lifetime.clicks / meta.lifetime.impressions) * 10000) / 100 : null,
+      olderThanWindow: firstDay === windowStart,
+      spend7: Math.round(now.spend),
+      impressions7: now.impressions,
+      ctrBase: ctrBase === null ? null : Math.round(ctrBase * 100) / 100,
+      ctrNow: ctrNow === null ? null : Math.round(ctrNow * 100) / 100,
+      ctrChangePct: ctrBase && ctrNow !== null ? pct(ctrNow, ctrBase) : null,
+      frequency7: freq === null ? null : Math.round(freq * 10) / 10,
+      cpmChangePct: cpmBase && cpmNow !== null ? pct(cpmNow, cpmBase) : null,
+      cpiBase: cpiBase === null ? null : Math.round(cpiBase),
+      cpiNow: cpiNow === null ? null : Math.round(cpiNow),
+      cpiChangePct: cpiBase && cpiNow !== null ? pct(cpiNow, cpiBase) : null,
+      reasons: [],
+      action: '',
+      ctrTrendPerDay: null,
+      fatigueInDays: null,
+    };
+
+    // CTR trend over the last 14 days (simple straight-line fit), used to forecast fatigue.
+    const trendRows = days.filter((d) => toMs(d.date) > endMs - 14 * DAY && d.impressions >= 100);
+    if (trendRows.length >= 7) {
+      const xs = trendRows.map((d) => (toMs(d.date) - endMs) / DAY);
+      const ys = trendRows.map((d) => (d.clicks / d.impressions) * 100);
+      const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+      let num = 0, den = 0;
+      for (let i = 0; i < xs.length; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) * (xs[i] - mx); }
+      if (den > 0) ad.ctrTrendPerDay = Math.round((num / den) * 10000) / 10000;
+    }
+
+    if ((ad.ageDays ?? daysLive) < RULES.minDaysToJudge) {
+      ad.stage = 'Too new';
+    } else if (daysLive < RULES.minDaysToJudge || base.impressions < RULES.minImpressions || now.impressions < RULES.minImpressions || !ctrBase || ctrNow === null) {
+      ad.stage = 'Too little data';
+    } else {
+      const ctrDrop = 1 - ctrNow / ctrBase;
+      const signals: { w: number; v: number }[] = [
+        { w: RULES.weights.ctr, v: clamp01(ctrDrop / RULES.ctrDropForFull) },
+        { w: RULES.weights.cpm, v: clamp01(((cpmNow as number) / (cpmBase as number) - 1) / RULES.costRiseForFull) },
+      ];
+      if (freq !== null) signals.push({ w: RULES.weights.frequency, v: clamp01((freq - RULES.frequencyLow) / (RULES.frequencyHigh - RULES.frequencyLow)) });
+      if (cpiBase && cpiNow) signals.push({ w: RULES.weights.cpi, v: clamp01((cpiNow / cpiBase - 1) / RULES.costRiseForFull) });
+      let wSum = 0, total = 0;
+      for (const s of signals) { wSum += s.w; total += s.w * s.v; }
+      const score = Math.round((total / wSum) * 100); // missing signals are left out and the rest re-weighted
+      ad.score = score;
+      ad.stage = score >= RULES.stages.dead ? 'Dead' : score >= RULES.stages.fatigued ? 'Fatigued' : score >= RULES.stages.watch ? 'Watch' : 'Fresh';
+
+      if (ad.ctrTrendPerDay !== null && ad.ctrTrendPerDay < 0 && (ad.stage === 'Fresh' || ad.stage === 'Watch')) {
+        const line = ctrBase * 0.7;
+        ad.fatigueInDays = ctrNow <= line ? 0 : Math.round((ctrNow - line) / -ad.ctrTrendPerDay);
+      }
+      if (ad.ctrChangePct !== null && ad.ctrChangePct <= -10) ad.reasons.push(`CTR ${ad.ctrChangePct}% vs its first week (${ad.ctrBase}% → ${ad.ctrNow}%)`);
+      if (freq !== null && freq >= RULES.frequencyLow) ad.reasons.push(`Seen ${ad.frequency7} times per person in 7 days`);
+      if (ad.cpiChangePct !== null && ad.cpiChangePct >= 10) ad.reasons.push(`Cost per install +${ad.cpiChangePct}% (₹${ad.cpiBase} → ₹${ad.cpiNow})`);
+      if (ad.cpmChangePct !== null && ad.cpmChangePct >= 10) ad.reasons.push(`CPM +${ad.cpmChangePct}%`);
+    }
+    out.push(ad);
+  });
+
+  // Auction shift: every judged ad in the same ad set dropped together, so it's the market, not the creative.
+  const bySet: Record<string, AdFatigue[]> = {};
+  out.forEach((a) => { if (a.score !== null) (bySet[a.adsetId] = bySet[a.adsetId] || []).push(a); });
+  Object.keys(bySet).forEach((id) => {
+    const ads = bySet[id];
+    if (ads.length < 2) return;
+    const allDropped = ads.every((a) => a.ctrChangePct !== null && a.ctrChangePct <= -RULES.auctionShiftCtrDrop * 100);
+    if (!allDropped) return;
+    ads.forEach((a) => { if (a.stage !== 'Fresh') a.stage = 'Auction shift'; });
+  });
+
+  out.forEach((a) => { a.action = ACTIONS[a.stage]; });
+  const order: Stage[] = ['Dead', 'Fatigued', 'Auction shift', 'Watch', 'Fresh', 'Too little data', 'Too new'];
+  return out.sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage) || b.spend7 - a.spend7);
 }
