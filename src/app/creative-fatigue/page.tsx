@@ -29,13 +29,22 @@ const SIDES = [
   { key: 'Supply', label: 'Supply (Quick Partner)' },
 ];
 
+const SORTS = [
+  { key: 'stage', label: 'Most urgent' },
+  { key: 'spend', label: 'Highest spend (7d)' },
+  { key: 'oldest', label: 'Oldest first' },
+  { key: 'newest', label: 'Newest first' },
+];
+
 const inr = (n: number) => '₹' + n.toLocaleString('en-IN');
+const dayYear = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const ageLabel = (n: number | null) => (n === null ? '—' : n < 60 ? `${n} days` : `${Math.round(n / 30)} months`);
 const day = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const ist = (iso: string) =>
   new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) + ' IST';
 const signed = (n: number | null, suffix = '%') => (n === null ? '—' : `${n > 0 ? '+' : ''}${n}${suffix}`);
 
-export default async function CreativeFatiguePage({ searchParams }: { searchParams: { stage?: string; side?: string } }) {
+export default async function CreativeFatiguePage({ searchParams }: { searchParams: { stage?: string; side?: string; sort?: string } }) {
   let data: FatigueReport;
   try {
     data = await getFatigueReport();
@@ -58,11 +67,17 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
   const side = SIDES.some((s) => s.key === searchParams.side) ? searchParams.side! : 'all';
   const stage = STAGES.some((s) => s.key === searchParams.stage) ? (searchParams.stage as Stage) : null;
   const inSide = data.ads.filter((a) => side === 'all' || a.side === side);
-  const list = inSide.filter((a) => !stage || a.stage === stage);
+  const sort = SORTS.some((s) => s.key === searchParams.sort) ? searchParams.sort! : 'stage';
+  const age = (a: AdFatigue) => (a.ageDays === null ? -1 : a.ageDays);
+  const list = inSide
+    .filter((a) => !stage || a.stage === stage)
+    .slice()
+    .sort((a, b) => (sort === 'spend' ? b.spend7 - a.spend7 : sort === 'oldest' ? age(b) - age(a) : sort === 'newest' ? age(a) - age(b) : 0));
   const count = (s: Stage) => inSide.filter((a) => a.stage === s).length;
   const alarms = inSide.filter((a) => a.stage === 'Dead' || a.stage === 'Fatigued').slice(0, 6);
   const atRisk = inSide.filter((a) => a.stage === 'Dead' || a.stage === 'Fatigued').reduce((s, a) => s + a.spend7, 0);
-  const link = (st: string | null, sd: string) => `/creative-fatigue?${new URLSearchParams({ ...(st ? { stage: st } : {}), side: sd }).toString()}#ads`;
+  const link = (st: string | null, sd: string, so: string = sort) =>
+    `/creative-fatigue?${new URLSearchParams({ ...(st ? { stage: st } : {}), side: sd, sort: so }).toString()}#ads`;
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-8 p-6 text-slate-900 lg:p-8">
@@ -125,6 +140,11 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                 </div>
                 <p className="font-medium leading-snug">{a.adName}</p>
                 <p className="text-xs text-slate-500">{a.campaignName} › {a.adsetName}</p>
+                <p className="text-xs text-slate-600">
+                  Launched {a.launchDate ? `${dayYear(a.launchDate)} (${ageLabel(a.ageDays)} ago)` : 'date unknown'}
+                  {a.lifetimeSpend !== null && <> · lifetime {inr(a.lifetimeSpend)}{a.lifetimeCpi !== null && <>, CPI {inr(a.lifetimeCpi)}</>}</>}
+                  {a.cpi7 !== null && <> · last 7 days CPI {inr(a.cpi7)}</>}
+                </p>
                 <ul className="list-disc pl-5 text-sm text-slate-700">
                   {a.reasons.map((r) => <li key={r}>{r}</li>)}
                 </ul>
@@ -136,21 +156,35 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
       </section>
 
       <section id="ads" className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">
-          All live ads {stage && <span className="text-base font-normal text-slate-500">· {stage}</span>}
-        </h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-lg font-semibold">
+            All live ads {stage && <span className="text-base font-normal text-slate-500">· {stage}</span>}
+          </h2>
+          <nav aria-label="Sort" className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-slate-500">Sort:</span>
+            {SORTS.map((s) => (
+              <Link
+                key={s.key}
+                href={link(stage, side, s.key)}
+                className={`rounded-full border px-2.5 py-1 ${s.key === sort ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}
+              >
+                {s.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead className="text-left text-xs text-slate-500">
               <tr className="border-b border-slate-200">
                 <th className="px-4 py-2.5 font-medium">Ad</th>
                 <th className="px-4 py-2.5 font-medium">Stage</th>
+                <th className="px-4 py-2.5 font-medium">Launched</th>
+                <th className="px-4 py-2.5 text-right font-medium">Last 7 days</th>
+                <th className="px-4 py-2.5 text-right font-medium">Lifetime</th>
                 <th className="px-4 py-2.5 text-right font-medium">CTR first wk → now</th>
                 <th className="px-4 py-2.5 text-right font-medium">Freq 7d</th>
-                <th className="px-4 py-2.5 text-right font-medium">CPI change</th>
-                <th className="px-4 py-2.5 text-right font-medium">CPM change</th>
-                <th className="px-4 py-2.5 text-right font-medium">Days live</th>
-                <th className="px-4 py-2.5 text-right font-medium">Spend 7d</th>
+                <th className="px-4 py-2.5 text-right font-medium">CPI / CPM change</th>
               </tr>
             </thead>
             <tbody>
@@ -167,15 +201,35 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${chipFor(a.stage)}`}>{a.stage}</span>
                       {a.score !== null && <span className="ml-1.5 text-xs text-slate-500">{a.score}</span>}
                     </td>
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      {a.launchDate ? (
+                        <>
+                          <p>{dayYear(a.launchDate)}</p>
+                          <p className="text-xs text-slate-500">{ageLabel(a.ageDays)} old</p>
+                        </>
+                      ) : '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                      <p>{inr(a.spend7)}</p>
+                      <p className="text-xs text-slate-500">{a.installs7} installs · CPI {a.cpi7 !== null ? inr(a.cpi7) : '—'}</p>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                      {a.lifetimeSpend !== null ? (
+                        <>
+                          <p>{inr(a.lifetimeSpend)}</p>
+                          <p className="text-xs text-slate-500">{a.lifetimeInstalls} installs · CPI {a.lifetimeCpi !== null ? inr(a.lifetimeCpi) : '—'}</p>
+                        </>
+                      ) : '—'}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
                       {a.ctrBase !== null && a.ctrNow !== null ? `${a.ctrBase}% → ${a.ctrNow}%` : '—'}
                       {a.ctrChangePct !== null && <span className={`ml-1 text-xs ${a.ctrChangePct < 0 ? 'text-red-700' : 'text-emerald-700'}`}>({signed(a.ctrChangePct)})</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{a.frequency7 ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{signed(a.cpiChangePct)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{signed(a.cpmChangePct)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{a.olderThanWindow ? `${a.daysLive}+` : a.daysLive}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{inr(a.spend7)}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums">
+                      <p>CPI {signed(a.cpiChangePct)}</p>
+                      <p className="text-xs text-slate-500">CPM {signed(a.cpmChangePct)}</p>
+                    </td>
                   </tr>
                 ))
               )}
@@ -189,8 +243,8 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         rise 20%, CPM rise 15% (signals without enough data are left out). Stages: under {RULES.stages.watch} Fresh, {RULES.stages.watch}–
         {RULES.stages.fatigued - 1} Watch, {RULES.stages.fatigued}–{RULES.stages.dead - 1} Fatigued, {RULES.stages.dead}+ Dead. Ads need{' '}
         {RULES.minImpressions.toLocaleString('en-IN')} impressions in both weeks. If every ad in an ad set drops at least{' '}
-        {RULES.auctionShiftCtrDrop * 100}% together, it’s marked “Auction shift”. “Days live” with a + means the ad started before this
-        data window. Thresholds are starting values to tune after 2–3 weeks.
+        {RULES.auctionShiftCtrDrop * 100}% together, it’s marked “Auction shift”. For ads launched more than 35 days ago, the “first week” is the earliest week Meta returns in this window, and lifetime
+        numbers cover everything since launch. Thresholds are starting values to tune after 2–3 weeks.
       </footer>
     </main>
   );
