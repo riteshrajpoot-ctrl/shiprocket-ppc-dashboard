@@ -17,6 +17,8 @@ export type AdInfo = {
   adsetName: string;
   campaignName: string;
   side: 'Supply' | 'Demand';
+  launchDate: string | null; // when the ad was created in Ads Manager (YYYY-MM-DD)
+  lifetime: { spend: number; impressions: number; clicks: number; installs: number } | null; // since launch
 };
 
 export type Stage = 'Fresh' | 'Watch' | 'Fatigued' | 'Dead' | 'Auction shift' | 'Too new' | 'Too little data';
@@ -25,7 +27,14 @@ export type AdFatigue = AdInfo & {
   stage: Stage;
   score: number | null; // 0–100, higher = more tired
   firstDay: string;
-  daysLive: number;
+  daysLive: number; // days with data inside our 35-day window
+  ageDays: number | null; // days since launch, up to the end of the window
+  installs7: number;
+  cpi7: number | null;
+  lifetimeSpend: number | null;
+  lifetimeInstalls: number | null;
+  lifetimeCpi: number | null;
+  lifetimeCtr: number | null; // %
   olderThanWindow: boolean; // started before our data window, so the baseline is the earliest week we have
   spend7: number;
   impressions7: number;
@@ -125,6 +134,13 @@ export function scoreAds(
       score: null,
       firstDay,
       daysLive,
+      ageDays: meta.launchDate ? Math.max(0, Math.round((endMs - toMs(meta.launchDate)) / DAY)) : null,
+      installs7: now.installs,
+      cpi7: now.installs ? Math.round(now.spend / now.installs) : null,
+      lifetimeSpend: meta.lifetime ? Math.round(meta.lifetime.spend) : null,
+      lifetimeInstalls: meta.lifetime ? meta.lifetime.installs : null,
+      lifetimeCpi: meta.lifetime && meta.lifetime.installs ? Math.round(meta.lifetime.spend / meta.lifetime.installs) : null,
+      lifetimeCtr: meta.lifetime && meta.lifetime.impressions ? Math.round((meta.lifetime.clicks / meta.lifetime.impressions) * 10000) / 100 : null,
       olderThanWindow: firstDay === windowStart,
       spend7: Math.round(now.spend),
       impressions7: now.impressions,
@@ -140,7 +156,7 @@ export function scoreAds(
       action: '',
     };
 
-    if (daysLive < RULES.minDaysToJudge) {
+    if ((ad.ageDays ?? daysLive) < RULES.minDaysToJudge || daysLive < RULES.minDaysToJudge) {
       ad.stage = 'Too new';
     } else if (base.impressions < RULES.minImpressions || now.impressions < RULES.minImpressions || !ctrBase || ctrNow === null) {
       ad.stage = 'Too little data';
