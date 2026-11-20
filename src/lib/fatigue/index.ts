@@ -52,8 +52,8 @@ function insightsUrl(token: string, fields: string, since: string, until: string
 
 type AdDetails = { side: 'Supply' | 'Demand'; launchDate: string | null };
 
-// Launch date (created_time) plus the same Supply/Demand rule as /api/management-metrics:
-// an ad linking to the Quick Partner app is Supply.
+// Launch date (created_time) for each ad. Quick Partner ads moved to their own Meta account,
+// so every ad here is a Quick Delivery (Demand) ad; the Supply check is kept only as a safety label.
 async function fetchAdDetails(token: string, adIds: string[]): Promise<Record<string, AdDetails>> {
   const out: Record<string, AdDetails> = {};
   for (let i = 0; i < adIds.length; i += 50) {
