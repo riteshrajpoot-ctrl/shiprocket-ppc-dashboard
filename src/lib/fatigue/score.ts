@@ -48,6 +48,8 @@ export type AdFatigue = AdInfo & {
   cpiChangePct: number | null;
   reasons: string[];
   action: string;
+  ctrTrendPerDay: number | null; // CTR points per day over the last 14 days
+  fatigueInDays: number | null; // at the current CTR trend, days until CTR is 30% below its first week
 };
 
 // Starting values from the Smart Alarms plan; tune after 2–3 weeks of silent mode.
@@ -57,7 +59,7 @@ export const RULES = {
   frequencyLow: 1.5, // 7-day frequency where the signal starts
   frequencyHigh: 4, // 7-day frequency where the signal is full
   costRiseForFull: 0.5, // +50% CPI or CPM scores that signal at 100%
-  minImpressions: 3000, // per window, so small numbers don't trigger alarms
+  minImpressions: 2000, // per window, so small numbers don't trigger alarms
   minInstalls: 5, // per window, before CPI is used
   minDaysToJudge: 14, // a first week to compare against plus a recent week
   activeWithinDays: 3, // ads with no impressions in the last 3 days are treated as stopped
@@ -154,11 +156,25 @@ export function scoreAds(
       cpiChangePct: cpiBase && cpiNow !== null ? pct(cpiNow, cpiBase) : null,
       reasons: [],
       action: '',
+      ctrTrendPerDay: null,
+      fatigueInDays: null,
     };
 
-    if ((ad.ageDays ?? daysLive) < RULES.minDaysToJudge || daysLive < RULES.minDaysToJudge) {
+    // CTR trend over the last 14 days (simple straight-line fit), used to forecast fatigue.
+    const trendRows = days.filter((d) => toMs(d.date) > endMs - 14 * DAY && d.impressions >= 100);
+    if (trendRows.length >= 7) {
+      const xs = trendRows.map((d) => (toMs(d.date) - endMs) / DAY);
+      const ys = trendRows.map((d) => (d.clicks / d.impressions) * 100);
+      const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+      let num = 0, den = 0;
+      for (let i = 0; i < xs.length; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) * (xs[i] - mx); }
+      if (den > 0) ad.ctrTrendPerDay = Math.round((num / den) * 10000) / 10000;
+    }
+
+    if ((ad.ageDays ?? daysLive) < RULES.minDaysToJudge) {
       ad.stage = 'Too new';
-    } else if (base.impressions < RULES.minImpressions || now.impressions < RULES.minImpressions || !ctrBase || ctrNow === null) {
+    } else if (daysLive < RULES.minDaysToJudge || base.impressions < RULES.minImpressions || now.impressions < RULES.minImpressions || !ctrBase || ctrNow === null) {
       ad.stage = 'Too little data';
     } else {
       const ctrDrop = 1 - ctrNow / ctrBase;
@@ -174,6 +190,10 @@ export function scoreAds(
       ad.score = score;
       ad.stage = score >= RULES.stages.dead ? 'Dead' : score >= RULES.stages.fatigued ? 'Fatigued' : score >= RULES.stages.watch ? 'Watch' : 'Fresh';
 
+      if (ad.ctrTrendPerDay !== null && ad.ctrTrendPerDay < 0 && (ad.stage === 'Fresh' || ad.stage === 'Watch')) {
+        const line = ctrBase * 0.7;
+        ad.fatigueInDays = ctrNow <= line ? 0 : Math.round((ctrNow - line) / -ad.ctrTrendPerDay);
+      }
       if (ad.ctrChangePct !== null && ad.ctrChangePct <= -10) ad.reasons.push(`CTR ${ad.ctrChangePct}% vs its first week (${ad.ctrBase}% → ${ad.ctrNow}%)`);
       if (freq !== null && freq >= RULES.frequencyLow) ad.reasons.push(`Seen ${ad.frequency7} times per person in 7 days`);
       if (ad.cpiChangePct !== null && ad.cpiChangePct >= 10) ad.reasons.push(`Cost per install +${ad.cpiChangePct}% (₹${ad.cpiBase} → ₹${ad.cpiNow})`);
