@@ -19,8 +19,6 @@ export type Insights = {
   headline: string;
 };
 
-export const TARGETS = { supplyCpi: 20 }; // same Supply CPI target as Growth Overview
-
 export const VERDICT_RULES = {
   cutCpiRatio: 1.8, // CPI at least 1.8x the median of its side
   cutMinSpend7: 1000, // ...and at least ₹1,000 spent in 7 days
@@ -64,19 +62,14 @@ function week(days: DayTotal[], fromMs: number, toMsIncl: number): Week {
 const listNames = (ads: AdVerdict[], n = 3) =>
   ads.slice(0, n).map((a) => `“${a.adName}”`).join(', ') + (ads.length > n ? ` and ${ads.length - n} more` : '');
 
-export function buildInsights(allAds: AdFatigue[], allDays: DayTotal[], windowEnd: string, side: 'all' | 'Supply' | 'Demand'): Insights {
+// This Meta account now runs Quick Delivery (customer) ads only; Quick Partner moved to its own account.
+export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: string): Insights {
   const R = VERDICT_RULES;
-  const ads0 = allAds.filter((a) => side === 'all' || a.side === side);
-  const days = allDays.filter((d) => side === 'all' || d.side === side);
 
-  // Peer median CPI per side: an ad is judged against ads doing the same job.
-  const medians: Record<string, number | null> = {};
-  ['Supply', 'Demand'].forEach((s) => {
-    medians[s] = median(allAds.filter((a) => a.side === s && a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null).map((a) => a.cpi7 as number));
-  });
+  // Peer median CPI: each ad is judged against the other live ads in the account.
+  const med = median(ads0.filter((a) => a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null).map((a) => a.cpi7 as number));
 
   const ads: AdVerdict[] = ads0.map((a) => {
-    const med = medians[a.side];
     let ratio: number | null = null;
     if (med && a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null) ratio = Math.round((a.cpi7 / med) * 100) / 100;
     const zeroInstallBurn = med !== null && a.installs7 === 0 && a.spend7 >= Math.max(500, 1.5 * med);
@@ -91,7 +84,7 @@ export function buildInsights(allAds: AdFatigue[], allDays: DayTotal[], windowEn
     } else if (zeroInstallBurn) {
       verdict = 'Cut'; why = `${inr(a.spend7)} spent in 7 days with zero installs.`;
     } else if (ratio !== null && ratio >= R.cutCpiRatio && a.spend7 >= R.cutMinSpend7) {
-      verdict = 'Cut'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the ${a.side} median (${inr(med as number)}).`;
+      verdict = 'Cut'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the median (${inr(med as number)}).`;
     } else if (a.stage === 'Fatigued') {
       verdict = 'Refresh'; why = 'Fatigue score 50+: the audience has seen it too often.';
     } else if (ratio !== null && ratio <= R.scaleCpiRatio && a.installs7 >= R.scaleMinInstalls7 && freq < R.scaleMaxFrequency && a.stage !== 'Watch') {
@@ -104,11 +97,6 @@ export function buildInsights(allAds: AdFatigue[], allDays: DayTotal[], windowEn
         : 'Starting to slip versus its first week.';
     } else if (a.stage === 'Too little data') {
       verdict = 'Low delivery'; why = 'Too few impressions to learn from; Meta is barely delivering it.';
-    }
-    if (side === 'all' || side === 'Supply') {
-      if (a.side === 'Supply' && a.cpi7 !== null && a.cpi7 > TARGETS.supplyCpi && verdict === 'Keep') {
-        why = `CPI ${inr(a.cpi7)} is above the ₹${TARGETS.supplyCpi} Supply target.`;
-      }
     }
     return { ...a, verdict, why, peerMedianCpi: med, cpiVsMedian: ratio };
   });
