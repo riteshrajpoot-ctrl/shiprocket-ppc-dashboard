@@ -27,6 +27,7 @@ const NAV_ITEMS = [
       { label: 'Budget optimizer', href: '/budget-optimizer', icon: '◈' },
       { label: 'AI Sidekick', href: '/ai-sidekick', icon: '◇' },
       { label: 'Creative Intelligence', href: '/intelligence', icon: '◈', badge: 'New', badgeColor: '#6B21A8', badgeBg: '#F5F3FF' },
+      { label: 'Creative fatigue', href: '/creative-fatigue', icon: '◐', badge: 'New', badgeColor: '#9A3412', badgeBg: '#FFEDD5' },
       { label: 'Search term miner', href: '/search-terms', icon: '◉', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
     ],
   },
