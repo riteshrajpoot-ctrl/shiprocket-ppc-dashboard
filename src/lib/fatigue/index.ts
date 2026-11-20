@@ -47,29 +47,56 @@ function insightsUrl(token: string, fields: string, since: string, until: string
   return u.toString();
 }
 
-// Same Supply/Demand rule as /api/management-metrics: Quick Partner app link = Supply.
-async function detectSides(token: string, adIds: string[]): Promise<Record<string, 'Supply' | 'Demand'>> {
-  const side: Record<string, 'Supply' | 'Demand'> = {};
+type AdDetails = { side: 'Supply' | 'Demand'; launchDate: string | null };
+
+// Launch date (created_time) plus the same Supply/Demand rule as /api/management-metrics:
+// an ad linking to the Quick Partner app is Supply.
+async function fetchAdDetails(token: string, adIds: string[]): Promise<Record<string, AdDetails>> {
+  const out: Record<string, AdDetails> = {};
   for (let i = 0; i < adIds.length; i += 50) {
     const batch = adIds.slice(i, i + 50);
-    const reqs = batch.map((id) => ({ method: 'GET', relative_url: `${id}?fields=creative{object_store_url,object_story_spec}` }));
+    const reqs = batch.map((id) => ({ method: 'GET', relative_url: `${id}?fields=created_time,creative{object_store_url,object_story_spec}` }));
     try {
       const res = await fetch(`${GRAPH}/?batch=${encodeURIComponent(JSON.stringify(reqs))}&access_token=${token}&include_headers=false`, { method: 'POST', cache: 'no-store' });
       const json: any = await res.json();
       if (Array.isArray(json)) {
         json.forEach((item: any, idx: number) => {
           let s: 'Supply' | 'Demand' = 'Demand';
+          let launchDate: string | null = null;
           try {
             const d = JSON.parse(item.body);
             const url = d.creative?.object_store_url || d.creative?.object_story_spec?.link_data?.link || '';
             if (String(url).includes('quickpartner')) s = 'Supply';
+            if (d.created_time) launchDate = String(d.created_time).slice(0, 10);
           } catch {}
-          side[batch[idx]] = s;
+          out[batch[idx]] = { side: s, launchDate };
         });
       }
     } catch {}
   }
-  return side;
+  return out;
+}
+
+// Lifetime totals per ad (since launch), fetched only for the ads we score.
+async function fetchLifetime(token: string, adIds: string[]) {
+  const out: Record<string, { spend: number; impressions: number; clicks: number; installs: number }> = {};
+  for (let i = 0; i < adIds.length; i += 50) {
+    const ids = adIds.slice(i, i + 50);
+    const u = new URL(`${GRAPH}/${META_ACCOUNT_ID}/insights`);
+    u.searchParams.set('level', 'ad');
+    u.searchParams.set('fields', 'ad_id,spend,impressions,clicks,actions');
+    u.searchParams.set('date_preset', 'maximum');
+    u.searchParams.set('filtering', JSON.stringify([{ field: 'ad.id', operator: 'IN', value: ids }]));
+    u.searchParams.set('limit', '500');
+    u.searchParams.set('access_token', token);
+    try {
+      const rows = await getAll(u.toString());
+      rows.forEach((r: any) => {
+        out[r.ad_id] = { spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0, clicks: Number(r.clicks) || 0, installs: installsFrom(r.actions) };
+      });
+    } catch {} // lifetime numbers are extra context; the page still works without them
+  }
+  return out;
 }
 
 async function buildReport(): Promise<FatigueReport> {
@@ -105,7 +132,7 @@ async function buildReport(): Promise<FatigueReport> {
   daily.forEach((r: any) => {
     if (r.date_start >= recentStart && Number(r.impressions) > 0 && !seen[r.ad_id]) { seen[r.ad_id] = true; recentIds.push(r.ad_id); }
   });
-  const sides = await detectSides(token, recentIds);
+  const [details, lifetime] = await Promise.all([fetchAdDetails(token, recentIds), fetchLifetime(token, recentIds)]);
 
   const info: Record<string, AdInfo> = {};
   daily.forEach((r: any) => {
@@ -116,7 +143,9 @@ async function buildReport(): Promise<FatigueReport> {
         adsetId: r.adset_id,
         adsetName: r.adset_name,
         campaignName: r.campaign_name,
-        side: sides[r.ad_id] || 'Demand',
+        side: details[r.ad_id]?.side || 'Demand',
+        launchDate: details[r.ad_id]?.launchDate ?? null,
+        lifetime: lifetime[r.ad_id] ?? null,
       };
     }
   });
