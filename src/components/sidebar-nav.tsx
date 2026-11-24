@@ -11,7 +11,7 @@ const STARK_ITEMS = [
     items: [
       { label: 'Creative Fatigue', href: '/creative-fatigue', icon: '◐' },
       { label: 'Competitor View', href: '/competitors', icon: '◎' },
-      { label: 'Google Keywords Gap & Wasted Spend', href: '/google-gap', icon: '◉', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
+      { label: 'Google Keywords Gap & Wasted Spend', href: '/google-gap', icon: '◉', badge: 'New', badgeColor: '#9A3412', badgeBg: '#FFEDD5' },
     ],
   },
 ]
@@ -183,13 +183,13 @@ export default function Sidebar() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B', flexShrink: 0 }} />
-            <span>Google Ads · coming soon</span>
+            <span>Google Ads · daily script</span>
           </div>
         </div>
       ) : (
         <div style={{ padding: '12px 0', borderTop: '1px solid #F3F4F6', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
           <div title="Meta · Live" style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} />
-          <div title="Google Ads · coming soon" style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />
+          <div title="Google Ads · daily script" style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />
         </div>
       )}
     </aside>
