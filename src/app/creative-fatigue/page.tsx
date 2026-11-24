@@ -2,9 +2,11 @@ import Link from 'next/link';
 import { revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
-  buildInsights, getFatigueReport, RULES, VERDICT_RULES,
+  buildInsights, getFatigueReport, RULES, VERDICT_RULES, type ResultLabels,
   type AdVerdict, type FatigueReport, type Verdict,
 } from '../../lib/fatigue';
+import { currentBusiness } from '../../lib/stark/businesses';
+import StarkHeader from '../../components/stark-header';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -58,9 +60,9 @@ function Delta({ pct, goodWhenUp }: { pct: number | null; goodWhenUp: boolean })
 }
 
 // Creative map: 7-day spend (x) against CPI relative to peers (y). Below the line = cheaper than the median.
-function CreativeMap({ ads }: { ads: AdVerdict[] }) {
+function CreativeMap({ ads, labels }: { ads: AdVerdict[]; labels: ResultLabels }) {
   const pts = ads.filter((a) => a.cpiVsMedian !== null && a.spend7 > 0);
-  if (pts.length < 3) return <p className="text-sm text-slate-500">Not enough ads with installs to plot yet.</p>;
+  if (pts.length < 3) return <p className="text-sm text-slate-500">Not enough ads with {labels.many} to plot yet.</p>;
   const W = 820, H = 360, L = 56, Rm = 20, T = 12, B = 40;
   const maxX = Math.max(...pts.map((a) => a.spend7)) * 1.05;
   // y runs from -0.35 to 3.35 so the corner labels sit in bands that dots (0 to 3x) never reach
@@ -71,7 +73,7 @@ function CreativeMap({ ads }: { ads: AdVerdict[] }) {
   const labelled = pts.slice().sort((a, b) => b.spend7 - a.spend7).slice(0, 6).map((a) => a.adId);
   const halo = { paintOrder: 'stroke' as const, stroke: '#ffffff', strokeWidth: 4, strokeLinejoin: 'round' as const };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Scatter of ads by 7-day spend and CPI relative to the median">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={`Scatter of ads by 7-day spend and ${labels.costShort} relative to the median`}>
       <rect x={L} y={T} width={midX - L} height={y(1) - T} fill="#fef2f2" />
       <rect x={midX} y={T} width={W - Rm - midX} height={y(1) - T} fill="#fee2e2" />
       <rect x={L} y={y(1)} width={midX - L} height={H - B - y(1)} fill="#f0fdf4" />
@@ -91,7 +93,7 @@ function CreativeMap({ ads }: { ads: AdVerdict[] }) {
       <text x={(L + W) / 2} y={H - 8} fontSize="11" fill="#475569" textAnchor="middle">Spend, last 7 days →</text>
       {pts.map((a) => (
         <circle key={a.adId} cx={x(a.spend7)} cy={y(a.cpiVsMedian as number)} r={7} fill={vstyle(a.verdict).dot} fillOpacity={0.9} stroke="#fff" strokeWidth={1.5}>
-          <title>{`${a.adName}\n${a.verdict}: ${a.why}\n${inr(a.spend7)} · ${a.installs7} installs · CPI ${a.cpi7 !== null ? inr(a.cpi7) : '—'} (${a.cpiVsMedian}× median)`}</title>
+          <title>{`${a.adName}\n${a.verdict}: ${a.why}\n${inr(a.spend7)} · ${a.installs7} ${labels.many} · ${labels.costShort} ${a.cpi7 !== null ? inr(a.cpi7) : '—'} (${a.cpiVsMedian}× median)`}</title>
         </circle>
       ))}
       {pts.filter((a) => labelled.indexOf(a.adId) >= 0).map((a) => {
@@ -108,15 +110,19 @@ function CreativeMap({ ads }: { ads: AdVerdict[] }) {
   );
 }
 
-export default async function CreativeFatiguePage({ searchParams }: { searchParams: { v?: string; sort?: string } }) {
+export default async function CreativeFatiguePage({ searchParams }: { searchParams: { v?: string; sort?: string; b?: string } }) {
+  const business = currentBusiness(searchParams.b);
+  const L: ResultLabels = business.result;
   let data: FatigueReport;
   try {
-    data = await getFatigueReport();
+    data = await getFatigueReport(business.key);
   } catch (e) {
     const msg = (e as Error).message;
     return (
+      <>
+      <StarkHeader business={business} path="/creative-fatigue" />
       <main className="mx-auto max-w-3xl p-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Creative fatigue</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">Creative Fatigue · {business.name}</h1>
         <div className="mt-6 rounded-lg border border-red-300 bg-red-50 p-5 text-sm text-red-900">
           <p className="font-medium">Couldn’t read Meta ad data.</p>
           <p className="mt-1">{msg}</p>
@@ -125,12 +131,13 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
           )}
         </div>
       </main>
+      </>
     );
   }
 
   const vf = VERDICTS.some((v) => v.key === searchParams.v) ? (searchParams.v as Verdict) : null;
   const sort = SORTS.some((s) => s.key === searchParams.sort) ? searchParams.sort! : 'urgent';
-  const ins = buildInsights(data.ads, data.days, data.windowEnd);
+  const ins = buildInsights(data.ads, data.days, data.windowEnd, L);
   const order = VERDICTS.map((v) => v.key);
   const age = (a: AdVerdict) => (a.ageDays === null ? -1 : a.ageDays);
   const list = ins.ads
@@ -147,12 +154,14 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
   const tw = ins.thisWeek;
 
   return (
+    <>
+    <StarkHeader business={business} path="/creative-fatigue" />
     <main className="mx-auto flex max-w-6xl flex-col gap-8 p-6 text-slate-900 lg:p-8">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-semibold tracking-tight">Creative fatigue</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Creative Fatigue</h1>
           <p className="text-sm text-slate-600">
-            Meta ads · last 7 days to {day(data.windowEnd)}, compared with the week before and each ad’s first week · updated {ist(data.fetchedAt)}
+            {business.name} · Meta ads · last 7 days to {day(data.windowEnd)}, compared with the week before and each ad’s first week · updated {ist(data.fetchedAt)}
           </p>
         </div>
         <form action={refreshData}>
@@ -171,12 +180,12 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
             <Delta pct={ins.change.spendPct} goodWhenUp={true} />
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <p className="text-sm text-slate-500">Installs, 7 days</p>
+            <p className="text-sm text-slate-500">{L.many.charAt(0).toUpperCase() + L.many.slice(1)}, 7 days</p>
             <p className="text-2xl font-semibold tabular-nums">{tw.installs.toLocaleString('en-IN')}</p>
             <Delta pct={ins.change.installsPct} goodWhenUp={true} />
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <p className="text-sm text-slate-500">Cost per install</p>
+            <p className="text-sm text-slate-500">{L.costLong}</p>
             <p className="text-2xl font-semibold tabular-nums">{tw.cpi !== null ? inr(tw.cpi) : '—'}</p>
             <Delta pct={ins.change.cpiPct} goodWhenUp={false} />
           </div>
@@ -240,10 +249,10 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
       <section className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold">Creative map</h2>
-          <p className="text-sm text-slate-600">Each dot is an ad. Further right = more spend; higher = costlier per install than its peers. Hover a dot for details.</p>
+          <p className="text-sm text-slate-600">Each dot is an ad. Further right = more spend; higher = costlier per {L.one} than its peers. Hover a dot for details.</p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <CreativeMap ads={ins.ads} />
+          <CreativeMap ads={ins.ads} labels={L} />
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
             {VERDICTS.slice(0, 5).map((v) => (
               <span key={v.key} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: v.dot }} />{v.key}</span>
@@ -282,7 +291,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                 <th className="w-[15rem] px-4 py-2.5 font-medium">Verdict and why</th>
                 <th className="w-[8rem] px-4 py-2.5 font-medium">Launched</th>
                 <th className="w-[10rem] px-4 py-2.5 text-right font-medium">Last 7 days</th>
-                <th className="w-[7rem] px-4 py-2.5 text-right font-medium">CPI vs peers</th>
+                <th className="w-[7rem] px-4 py-2.5 text-right font-medium">{L.costShort} vs peers</th>
                 <th className="w-[11rem] px-4 py-2.5 text-right font-medium">Lifetime</th>
                 <th className="w-[9rem] px-4 py-2.5 text-right font-medium">CTR first wk → now</th>
                 <th className="w-[5rem] px-4 py-2.5 text-right font-medium">Freq 7d</th>
@@ -307,7 +316,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     <p>{inr(a.spend7)}</p>
-                    <p className="text-xs text-slate-500">{a.installs7} installs · CPI {a.cpi7 !== null ? inr(a.cpi7) : '—'}</p>
+                    <p className="text-xs text-slate-500">{a.installs7} {L.many} · {L.costShort} {a.cpi7 !== null ? inr(a.cpi7) : '—'}</p>
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {a.cpiVsMedian !== null ? (
@@ -318,7 +327,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                     {a.peerMedianCpi !== null && <p className="text-xs text-slate-500">median {inr(a.peerMedianCpi)}</p>}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
-                    {a.lifetimeSpend !== null ? (<><p>{inr(a.lifetimeSpend)}</p><p className="text-xs text-slate-500">{a.lifetimeInstalls} installs · CPI {a.lifetimeCpi !== null ? inr(a.lifetimeCpi) : '—'}</p></>) : '—'}
+                    {a.lifetimeSpend !== null ? (<><p>{inr(a.lifetimeSpend)}</p><p className="text-xs text-slate-500">{a.lifetimeInstalls} {L.many} · {L.costShort} {a.lifetimeCpi !== null ? inr(a.lifetimeCpi) : '—'}</p></>) : '—'}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {a.ctrBase !== null && a.ctrNow !== null ? `${a.ctrBase}% → ${a.ctrNow}%` : '—'}
@@ -337,14 +346,15 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
       </section>
 
       <footer className="border-t border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
-        How verdicts work: each ad’s 7-day CPI is compared with the median CPI of all live ads in this account. Cut = CPI {VERDICT_RULES.cutCpiRatio}×
-        the median with {inr(VERDICT_RULES.cutMinSpend7)}+ spend, zero installs on real spend, or fatigue score {RULES.stages.dead}+. Refresh = fatigue score{' '}
-        {RULES.stages.fatigued}+. Scale = CPI {VERDICT_RULES.scaleCpiRatio}× the median or lower, {VERDICT_RULES.scaleMinInstalls7}+ installs and frequency under{' '}
+        How verdicts work: each ad’s 7-day {L.costShort} is compared with the median {L.costShort} of all live ads in this account. Cut = {L.costShort} {VERDICT_RULES.cutCpiRatio}×
+        the median with {inr(VERDICT_RULES.cutMinSpend7)}+ spend, zero {L.many} on real spend, or fatigue score {RULES.stages.dead}+. Refresh = fatigue score{' '}
+        {RULES.stages.fatigued}+. Scale = {L.costShort} {VERDICT_RULES.scaleCpiRatio}× the median or lower, {VERDICT_RULES.scaleMinInstalls7}+ {L.many} and frequency under{' '}
         {VERDICT_RULES.scaleMaxFrequency}. Watch = slipping, costlier than peers ({VERDICT_RULES.watchCpiRatio}×+), or forecast to tire within{' '}
-        {VERDICT_RULES.forecastDays} days. The fatigue score compares each ad with its own first week: CTR drop 40%, frequency 25%, CPI rise 20%, CPM rise 15%.
-        “Tires in” extends the last 14 days’ CTR trend to the point where CTR is 30% below the first week. Budget-shift install gains are estimates.
+        {VERDICT_RULES.forecastDays} days. The fatigue score compares each ad with its own first week: CTR drop 40%, frequency 25%, {L.costShort} rise 20%, CPM rise 15%.
+        “Tires in” extends the last 14 days’ CTR trend to the point where CTR is 30% below the first week. Budget-shift gains are estimates. {data.resultActionUsed ? <>A {L.one} is counted from Meta’s “{data.resultActionUsed}” event.</> : <>No {L.one} events were found in this account’s data yet.</>}
         All thresholds are starting values to tune after 2–3 weeks.
       </footer>
     </main>
+    </>
   );
 }

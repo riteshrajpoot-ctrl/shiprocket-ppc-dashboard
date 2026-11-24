@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { getIntelligence, ADS_URL, type CachedIntelligence, type Creative } from '@/lib/competitors';
+import { getIntelligence, ADS_URL, type CachedIntelligence, type Creative } from '../../lib/competitors';
+import { currentBusiness } from '../../lib/stark/businesses';
+import StarkHeader from '../../components/stark-header';
 
 // "Refresh data" button: drop the cached copy so the page re-reads ads.json now.
 async function refreshData() {
@@ -43,16 +45,19 @@ const CHANNELS = [
 ] as const;
 const CHANNEL_NAME: Record<string, string> = { meta: 'Meta', google: 'Google', youtube: 'YouTube' };
 
-type Search = { c?: string; f?: string; ch?: string };
+type Search = { c?: string; f?: string; ch?: string; b?: string };
 
 export default async function CompetitorsPage({ searchParams }: { searchParams: Search }) {
+  const business = currentBusiness(searchParams.b);
   let data: CachedIntelligence;
   try {
-    data = await getIntelligence();
+    data = await getIntelligence(business.key);
   } catch (e) {
     return (
+      <>
+      <StarkHeader business={business} path="/competitors" />
       <main className="mx-auto max-w-3xl p-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Competitor intelligence</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">Competitor View · {business.name}</h1>
         <div className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
           <p className="font-medium">Couldn’t read the competitor report.</p>
           <p className="mt-1">
@@ -60,6 +65,7 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
           </p>
         </div>
       </main>
+      </>
     );
   }
 
@@ -86,12 +92,17 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
     `/competitors?${new URLSearchParams({ ...(c ? { c } : {}), f, ch }).toString()}#creatives`;
 
   return (
+    <>
+    <StarkHeader business={business} path="/competitors" />
     <main className="mx-auto flex max-w-6xl flex-col gap-10 p-6 text-slate-900 lg:p-8">
       {/* Headline */}
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-semibold tracking-tight">Competitor intelligence</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">Competitor View</h1>
+            <p className="text-sm text-slate-600">
+              {business.name} vs {data.tracked.join(', ') || 'no tracked competitors yet'} · rider-hiring ads excluded
+            </p>
             <p className="text-sm font-medium text-slate-700">
               Data as of: tracker run of {ist(data.generatedAt)} · covers the {data.periodDays} days before it
             </p>
@@ -105,6 +116,12 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
             </button>
           </form>
         </div>
+        {data.notTracked.length > 0 && (
+          <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+            <span className="font-medium">Not in the competitor tracker yet:</span> {data.notTracked.join(', ')}. Ask the tracker owner to add their
+            Meta pages and Google advertiser accounts, and they’ll appear here automatically.
+          </p>
+        )}
         {stale && (
           <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             The tracker hasn’t produced a new run for {Math.floor(ageHours / 24)} days. Refreshing re-reads the same file; ask the tracker
@@ -114,7 +131,7 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
         <p className="max-w-3xl text-lg leading-relaxed text-slate-700">
           <strong className="font-semibold text-slate-900">{totals.leader}</strong> runs{' '}
           <strong className="font-semibold text-slate-900">{totals.leaderSharePct}%</strong> of all tracked ads
-          {totals.leaderVsUs ? <>, {totals.leaderVsUs}× Shiprocket’s volume</> : null}.
+          {totals.leaderVsUs ? <>, {totals.leaderVsUs}× {business.name}’s volume</> : null}.
           {signals[0] ? (
             <> Top signal this week: {signals[0].competitor}, {signals[0].headline.charAt(0).toLowerCase() + signals[0].headline.slice(1)}.</>
           ) : null}
@@ -123,10 +140,10 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
 
       {/* Key numbers */}
       <section aria-label="Key numbers" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Competitor ads live" value={int(totals.competitorAds)} note={`${rivals.length} competitors`} />
-        <Kpi label="Shiprocket share of voice" value={`${totals.ourSharePct}%`} note="Our ads ÷ all tracked ads" />
+        <Kpi label="Competitor ads live" value={int(totals.competitorAds)} note={`${rivals.length} tracked competitor${rivals.length === 1 ? '' : 's'}`} />
+        <Kpi label={`${business.name} share of voice`} value={`${totals.ourSharePct}%`} note="Our ads ÷ all tracked ads" />
         <Kpi label="New competitor creatives" value={int(newCreatives)} note={`First seen in the last ${data.periodDays} days`} />
-        <Kpi label="New offers" value={`${newCodes + newPayouts}`} note={`${newCodes} promo codes, ${newPayouts} rider payouts`} />
+        <Kpi label="New offers" value={`${newCodes + newPayouts}`} note={`promo codes first seen in the last ${data.periodDays} days`} />
       </section>
 
       {/* Signals */}
@@ -169,7 +186,7 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
           {competitors.map((c) => (
             <Link key={c.name} href={link(c.name, 'all')} className="group grid grid-cols-[8rem_1fr_7.5rem] items-center gap-3 text-sm">
               <span className={c.isSelf ? 'font-semibold text-indigo-700' : 'text-slate-700 group-hover:text-slate-900'}>
-                {c.isSelf ? `${c.name} (us)` : c.name}
+                {c.isSelf ? `${business.name} (us)` : c.name}
               </span>
               <span className="flex h-4 overflow-hidden rounded-sm bg-slate-100" style={{ width: `${(c.total / maxTotal) * 100}%` }}>
                 {PLATFORM.map((p) => (
@@ -322,6 +339,7 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
         30+ days. {data.skippedAds > 0 && `${int(data.skippedAds)} Google/YouTube ads had no readable text and are counted in volume only.`}
       </footer>
     </main>
+    </>
   );
 }
 

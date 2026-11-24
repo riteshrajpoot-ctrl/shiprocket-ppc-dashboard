@@ -4,7 +4,20 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
-const NAV_ITEMS = [
+// STARK 2.0: management sees only these three pages.
+const STARK_ITEMS = [
+  {
+    group: 'STARK 2.0',
+    items: [
+      { label: 'Creative Fatigue', href: '/creative-fatigue', icon: '◐' },
+      { label: 'Competitor View', href: '/competitors', icon: '◎' },
+      { label: 'Google Keywords Gap & Wasted Spend', href: '/google-gap', icon: '◉', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
+    ],
+  },
+]
+
+// Older pages stay live (and are listed on /tools). Set NEXT_PUBLIC_SHOW_LEGACY_NAV=true in Vercel to show them here again.
+const LEGACY_ITEMS = [
   {
     group: 'Overview',
     items: [
@@ -14,11 +27,10 @@ const NAV_ITEMS = [
   {
     group: 'Analytics',
     items: [
-      { label: 'Meta Ads', href: '/growth-overview', icon: '⬡', badge: 'Live', badgeColor: '#065F46', badgeBg: '#D1FAE5' },
-      { label: 'Branch', href: '/branch', icon: '⬢', badge: 'Beta', badgeColor: '#92400E', badgeBg: '#FEF3C7' },
-      { label: 'Affiliate', href: '/affiliate', icon: '⬡', badge: 'Beta', badgeColor: '#92400E', badgeBg: '#FEF3C7' },
-      { label: 'Competitors', href: '/competitors', icon: '◎', badge: 'New', badgeColor: '#6B21A8', badgeBg: '#F5F3FF' },
-      { label: 'Google Ads', href: '/google-ads', icon: '⬡', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
+      { label: 'Meta Ads', href: '/growth-overview', icon: '⬡' },
+      { label: 'Branch', href: '/branch', icon: '⬢' },
+      { label: 'Affiliate', href: '/affiliate', icon: '⬡' },
+      { label: 'Google Ads', href: '/google-ads', icon: '⬡' },
     ],
   },
   {
@@ -26,12 +38,13 @@ const NAV_ITEMS = [
     items: [
       { label: 'Budget optimizer', href: '/budget-optimizer', icon: '◈' },
       { label: 'AI Sidekick', href: '/ai-sidekick', icon: '◇' },
-      { label: 'Creative Intelligence', href: '/intelligence', icon: '◈', badge: 'New', badgeColor: '#6B21A8', badgeBg: '#F5F3FF' },
-      { label: 'Creative fatigue', href: '/creative-fatigue', icon: '◐', badge: 'New', badgeColor: '#9A3412', badgeBg: '#FFEDD5' },
-      { label: 'Search term miner', href: '/search-terms', icon: '◉', badge: 'Soon', badgeColor: '#6B7280', badgeBg: '#F3F4F6' },
+      { label: 'Creative Intelligence', href: '/intelligence', icon: '◈' },
+      { label: 'Search term miner', href: '/search-terms', icon: '◉' },
     ],
   },
 ]
+
+const NAV_ITEMS = process.env.NEXT_PUBLIC_SHOW_LEGACY_NAV === 'true' ? STARK_ITEMS.concat(LEGACY_ITEMS) : STARK_ITEMS
 
 const COLLAPSED_KEY = 'sidebar_collapsed'
 
@@ -77,13 +90,13 @@ export default function Sidebar() {
       {/* Logo + collapse toggle */}
       <div style={{ padding: '0 12px 16px', borderBottom: '1px solid #F3F4F6', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#18181B', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>SR</span>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#F97316', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: '#fff', fontSize: 11, fontWeight: 800 }}>S2</span>
           </div>
           {!collapsed && (
             <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#111', lineHeight: 1 }}>PPC Command</div>
-              <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>Shiprocket</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1, letterSpacing: '.02em' }}>STARK 2.0</div>
+              <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>PPC Command · Shiprocket</div>
             </div>
           )}
         </div>
@@ -133,7 +146,7 @@ export default function Sidebar() {
                     textDecoration: 'none',
                     transition: 'background .12s',
                     overflow: 'hidden',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: collapsed ? 'nowrap' : 'normal',
                   }}
                   onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = '#F9FAFB' }}
                   onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
@@ -141,7 +154,7 @@ export default function Sidebar() {
                   <span style={{ fontSize: 15, color: active ? '#111' : '#6B7280', width: 20, textAlign: 'center', flexShrink: 0 }}>{item.icon}</span>
                   {!collapsed && (
                     <>
-                      <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? '#111' : '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                      <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? '#111' : '#374151', flex: 1, whiteSpace: 'normal', lineHeight: 1.3 }}>{item.label}</span>
                       {(item as any).badge && (
                         <span style={{
                           fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 10,
@@ -170,13 +183,13 @@ export default function Sidebar() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B', flexShrink: 0 }} />
-            <span>Branch · API connecting</span>
+            <span>Google Ads · coming soon</span>
           </div>
         </div>
       ) : (
         <div style={{ padding: '12px 0', borderTop: '1px solid #F3F4F6', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
           <div title="Meta · Live" style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} />
-          <div title="Branch · API connecting" style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />
+          <div title="Google Ads · coming soon" style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />
         </div>
       )}
     </aside>

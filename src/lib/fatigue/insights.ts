@@ -63,8 +63,12 @@ const listNames = (ads: AdVerdict[], n = 3) =>
   ads.slice(0, n).map((a) => `“${a.adName}”`).join(', ') + (ads.length > n ? ` and ${ads.length - n} more` : '');
 
 // This Meta account now runs Quick Delivery (customer) ads only; Quick Partner moved to its own account.
-export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: string): Insights {
+export type ResultLabels = { one: string; many: string; costShort: string; costLong: string };
+const DEFAULT_LABELS: ResultLabels = { one: 'install', many: 'installs', costShort: 'CPI', costLong: 'Cost per install' };
+
+export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: string, L: ResultLabels = DEFAULT_LABELS): Insights {
   const R = VERDICT_RULES;
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
   // Peer median CPI: each ad is judged against the other live ads in the account.
   const med = median(ads0.filter((a) => a.installs7 >= R.minInstallsForCpi && a.cpi7 !== null).map((a) => a.cpi7 as number));
@@ -82,18 +86,18 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
     } else if (a.stage === 'Dead') {
       verdict = 'Cut'; why = 'Fatigue score 75+: CTR has collapsed and costs are rising.';
     } else if (zeroInstallBurn) {
-      verdict = 'Cut'; why = `${inr(a.spend7)} spent in 7 days with zero installs.`;
+      verdict = 'Cut'; why = `${inr(a.spend7)} spent in 7 days with zero ${L.many}.`;
     } else if (ratio !== null && ratio >= R.cutCpiRatio && a.spend7 >= R.cutMinSpend7) {
-      verdict = 'Cut'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the median (${inr(med as number)}).`;
+      verdict = 'Cut'; why = `${L.costShort} ${inr(a.cpi7 as number)} is ${ratio}× the median (${inr(med as number)}).`;
     } else if (a.stage === 'Fatigued') {
       verdict = 'Refresh'; why = 'Fatigue score 50+: the audience has seen it too often.';
     } else if (ratio !== null && ratio <= R.scaleCpiRatio && a.installs7 >= R.scaleMinInstalls7 && freq < R.scaleMaxFrequency && a.stage !== 'Watch') {
-      verdict = 'Scale'; why = `CPI ${inr(a.cpi7 as number)} is ${ratio}× the median with room to grow (frequency ${a.frequency7 ?? '—'}).`;
+      verdict = 'Scale'; why = `${L.costShort} ${inr(a.cpi7 as number)} is ${ratio}× the median with room to grow (frequency ${a.frequency7 ?? '—'}).`;
     } else if (a.stage === 'Watch' || a.stage === 'Auction shift' || (a.fatigueInDays !== null && a.fatigueInDays <= R.forecastDays) || (ratio !== null && ratio >= R.watchCpiRatio)) {
       verdict = 'Watch';
       why = a.stage === 'Auction shift' ? 'Whole ad set dropped together: likely bids, budget or competition.'
         : a.fatigueInDays !== null && a.fatigueInDays <= R.forecastDays ? `CTR falling; forecast to tire in about ${a.fatigueInDays} days.`
-        : ratio !== null && ratio >= R.watchCpiRatio ? `CPI ${ratio}× the median: costlier than peers.`
+        : ratio !== null && ratio >= R.watchCpiRatio ? `${L.costShort} ${ratio}× the median: costlier than peers.`
         : 'Starting to slip versus its first week.';
     } else if (a.stage === 'Too little data') {
       verdict = 'Low delivery'; why = 'Too few impressions to learn from; Meta is barely delivering it.';
@@ -122,7 +126,7 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
   if (change.cpiPct !== null && change.cpiPct >= 15) {
     alarms.push({
       level: change.cpiPct >= 30 ? 'Critical' : 'Warning',
-      title: `Cost per install up ${change.cpiPct}% week on week`,
+      title: `${L.costLong} up ${change.cpiPct}% week on week`,
       detail: `${inr(lastWeek.cpi as number)} → ${inr(thisWeek.cpi as number)} on ${inr(thisWeek.spend)} spend.`,
       action: 'Check the Cut and Refresh ads below first; they usually explain most of the rise.',
     });
@@ -130,8 +134,8 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
   if (change.installsPct !== null && change.installsPct <= -20) {
     alarms.push({
       level: change.installsPct <= -35 ? 'Critical' : 'Warning',
-      title: `Installs down ${Math.abs(change.installsPct)}% week on week`,
-      detail: `${lastWeek.installs.toLocaleString('en-IN')} → ${thisWeek.installs.toLocaleString('en-IN')} installs${change.spendPct !== null ? `, spend ${change.spendPct > 0 ? '+' : ''}${change.spendPct}%` : ''}.`,
+      title: `${cap(L.many)} down ${Math.abs(change.installsPct)}% week on week`,
+      detail: `${lastWeek.installs.toLocaleString('en-IN')} → ${thisWeek.installs.toLocaleString('en-IN')} ${L.many}${change.spendPct !== null ? `, spend ${change.spendPct > 0 ? '+' : ''}${change.spendPct}%` : ''}.`,
       action: 'If spend held steady, creatives are tiring; if spend fell, check budgets and pacing.',
     });
   }
@@ -195,11 +199,11 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
     recs.push({
       verb: 'Shift budget',
       title: `Move the ${inr(wasted7)} to ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`,
-      detail: `${listNames(scale)} install at a median ${inr(scaleMed)}. Raise their budgets in steps of 20–30% so CPI holds.`,
-      impact: `Roughly ${gained - cutInstalls > 0 ? '+' : ''}${(gained - cutInstalls).toLocaleString('en-IN')} installs a week (estimate; CPI usually rises a little as budget grows)`,
+      detail: `${listNames(scale)} cost a median ${inr(scaleMed)} per ${L.one}. Raise their budgets in steps of 20–30% so ${L.costShort} holds.`,
+      impact: `Roughly ${gained - cutInstalls > 0 ? '+' : ''}${(gained - cutInstalls).toLocaleString('en-IN')} ${L.many} a week (estimate; ${L.costShort} usually rises a little as budget grows)`,
     });
   } else if (scale.length) {
-    recs.push({ verb: 'Scale', title: `Raise budget on ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`, detail: `${listNames(scale)}: CPI well below peers and frequency still low.`, impact: 'Add 20–30% budget, then re-check CPI after 3 days' });
+    recs.push({ verb: 'Scale', title: `Raise budget on ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`, detail: `${listNames(scale)}: ${L.costShort} well below peers and frequency still low.`, impact: `Add 20–30% budget, then re-check ${L.costShort} after 3 days` });
   }
   const toRefresh = refresh.concat(tiring.filter((a) => a.verdict !== 'Refresh'));
   if (toRefresh.length) {
@@ -214,7 +218,7 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
 
   const n = alarms.filter((a) => a.level !== 'Watch').length;
   const headline =
-    `Last 7 days: ${inr(thisWeek.spend)} spend, ${thisWeek.installs.toLocaleString('en-IN')} installs, CPI ${thisWeek.cpi !== null ? inr(thisWeek.cpi) : '—'}` +
+    `Last 7 days: ${inr(thisWeek.spend)} spend, ${thisWeek.installs.toLocaleString('en-IN')} ${L.many}, ${L.costShort} ${thisWeek.cpi !== null ? inr(thisWeek.cpi) : '—'}` +
     (change.cpiPct !== null ? ` (${change.cpiPct > 0 ? '+' : ''}${change.cpiPct}% vs the week before)` : '') +
     `. ${n ? `${n} alarm${n > 1 ? 's' : ''} need attention` : 'No critical alarms'}${wasted7 ? `; ${inr(wasted7)} a week is going to ads worth cutting` : ''}.`;
 

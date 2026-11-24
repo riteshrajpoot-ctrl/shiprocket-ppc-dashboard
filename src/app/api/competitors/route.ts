@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
-import { getIntelligence } from '@/lib/competitors';
+import { getIntelligence } from '../../../lib/competitors';
+import { businessByKey } from '../../../lib/stark/businesses';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// GET /api/competitors            -> processed intelligence as JSON (for Slack, alarms, etc.)
-// GET /api/competitors?refresh=1&key=SECRET -> re-read ads.json now
+// GET /api/competitors?b=lm|quick               -> processed intelligence for that business, as JSON
+// GET /api/competitors?refresh=1&key=SECRET     -> re-read ads.json now
 export async function GET(req: Request) {
   const url = new URL(req.url);
   if (url.searchParams.get('refresh') === '1') {
@@ -16,7 +17,7 @@ export async function GET(req: Request) {
     revalidateTag('competitor-intelligence');
   }
   try {
-    return NextResponse.json(await getIntelligence());
+    return NextResponse.json(await getIntelligence(businessByKey(url.searchParams.get('b')).key));
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

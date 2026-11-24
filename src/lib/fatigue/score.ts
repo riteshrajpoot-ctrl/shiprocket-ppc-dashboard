@@ -94,6 +94,7 @@ export function scoreAds(
   frequency7: Record<string, number>,
   windowStart: string,
   windowEnd: string,
+  costLong: string = 'Cost per install', // the business's result cost, e.g. "Cost per sign-up"
 ): AdFatigue[] {
   const endMs = toMs(windowEnd);
   const recentStartMs = endMs - 6 * DAY;
@@ -196,7 +197,7 @@ export function scoreAds(
       }
       if (ad.ctrChangePct !== null && ad.ctrChangePct <= -10) ad.reasons.push(`CTR ${ad.ctrChangePct}% vs its first week (${ad.ctrBase}% → ${ad.ctrNow}%)`);
       if (freq !== null && freq >= RULES.frequencyLow) ad.reasons.push(`Seen ${ad.frequency7} times per person in 7 days`);
-      if (ad.cpiChangePct !== null && ad.cpiChangePct >= 10) ad.reasons.push(`Cost per install +${ad.cpiChangePct}% (₹${ad.cpiBase} → ₹${ad.cpiNow})`);
+      if (ad.cpiChangePct !== null && ad.cpiChangePct >= 10) ad.reasons.push(`${costLong} +${ad.cpiChangePct}% (₹${ad.cpiBase} → ₹${ad.cpiNow})`);
       if (ad.cpmChangePct !== null && ad.cpmChangePct >= 10) ad.reasons.push(`CPM +${ad.cpmChangePct}%`);
     }
     out.push(ad);
