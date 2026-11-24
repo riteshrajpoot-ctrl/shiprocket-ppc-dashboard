@@ -17,6 +17,7 @@ export type CampaignRow = {
   installs: number;
   firstOrdersGoogle: number;
   firstOrdersBranch: number | null;
+  installsBranch: number | null;
   firstOrdersPrev: number;
   costPerFirstOrder: number | null;
   costPerFirstOrderPrev: number | null;
@@ -37,6 +38,7 @@ export type GoogleInsights = {
   totals: {
     spend: number; spendPrev: number;
     installs: number; installsPrev: number;
+    installsBranch: number | null;
     firstOrdersGoogle: number; firstOrdersGooglePrev: number;
     firstOrdersBranch: number | null; firstOrdersBranchPrev: number | null;
     costPerFirstOrder: number | null; costPerFirstOrderPrev: number | null;
@@ -92,15 +94,17 @@ function median(xs: number[]): number | null {
 }
 
 const isPartner = (a: string) => /quickpartner/i.test(a);
-const isInstall = (a: string) => /installs(\s|$)/i.test(a) || /\sinstalls\s\d{4}-/i.test(a);
+// Installs = Firebase "first_open" (installed AND opened): the same number Google Ads shows in its Installs column,
+// and comparable with Branch. The Google Play "installs" action counts downloads, including never-opened ones.
+const isInstall = (a: string) => /(^|\s)first_open(\s|$)/i.test(a);
 const isFirstOrder = (a: string) => /first_order_created_fe(\s|$)/i.test(a) || /first_order_created_fe\s\d{4}-/i.test(a);
 const isAnyOrder = (a: string) => /(^|\s)order_created_fe(\s|$)/i.test(a) || /(^|\s)order_created_fe\s\d{4}-/i.test(a);
 
 function goalLabel(a: string): string {
   if (isFirstOrder(a)) return 'first orders';
   if (isAnyOrder(a)) return 'all orders';
-  if (isInstall(a)) return 'installs';
-  if (/first_open/i.test(a)) return 'first opens';
+  if (isInstall(a)) return 'installs (first open)';
+  if (/installs(\s|$)/i.test(a)) return 'Play downloads';
   if (/signup/i.test(a)) return 'sign-ups';
   return a.replace(/\s\d{4}-\d\d-\d\dT[\d:.]+$/, '').replace(/^.*\)\s*/, '');
 }
@@ -143,7 +147,8 @@ export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null,
     if (isPartner(action)) { if (inW(d) || inP(d)) { partnerEvents += n(r.all_conversions); partnerCampaigns[name] = true; } return; }
     if (inW(d) && n(r.conversions) > 0) a.goals[goalLabel(action)] = true;
     const all = n(r.all_conversions);
-    if (isInstall(action)) { if (inW(d)) a.installs += all; else if (inP(d)) a.installsPrev += all; }
+    // Installs use "conversions" (Google's own count for this primary goal), which matches the Google Ads Installs column.
+    if (isInstall(action)) { if (inW(d)) a.installs += n(r.conversions); else if (inP(d)) a.installsPrev += n(r.conversions); }
     if (isFirstOrder(action)) { if (inW(d)) a.fo += all; else if (inP(d)) a.foPrev += all; }
     if (isAnyOrder(action) && inW(d)) a.orders += all;
   });
@@ -187,6 +192,7 @@ export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null,
       installs: Math.round(a.installs),
       firstOrdersGoogle: Math.round(a.fo),
       firstOrdersBranch: bThis ? bThis.orders : null,
+      installsBranch: bThis ? bThis.installs : null,
       firstOrdersPrev: Math.round(foPrev),
       costPerFirstOrder: fo ? Math.round(a.spend / fo) : null,
       costPerFirstOrderPrev: foPrev ? Math.round(a.spendPrev / foPrev) : null,
@@ -242,6 +248,7 @@ export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null,
   const foFinalPrev = foBPrev !== null ? foBPrev : foGPrev;
   const totals = {
     spend, spendPrev, installs: installsT, installsPrev: installsPrevT,
+    installsBranch: matchedRows.length ? sum((r) => r.installsBranch || 0) : null,
     firstOrdersGoogle: foG, firstOrdersGooglePrev: foGPrev, firstOrdersBranch: foB, firstOrdersBranchPrev: foBPrev,
     costPerFirstOrder: foFinal ? Math.round(spend / foFinal) : null,
     costPerFirstOrderPrev: foFinalPrev ? Math.round(spendPrev / foFinalPrev) : null,

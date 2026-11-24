@@ -138,7 +138,8 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
             <Kpi label={`First orders (${T.firstOrderSource})`} value={num(foNow)} delta={<Delta pct={chg(foNow, foPrev)} goodWhenUp={true} />}
               sub={T.firstOrderSource === 'Branch' ? `Google counts ${num(T.firstOrdersGoogle)}` : undefined} />
             <Kpi label="Cost per first order" value={T.costPerFirstOrder !== null ? inr(T.costPerFirstOrder) : '—'} delta={<Delta pct={chg(T.costPerFirstOrder, T.costPerFirstOrderPrev)} goodWhenUp={false} />} />
-            <Kpi label="Installs (Google)" value={num(T.installs)} delta={<Delta pct={chg(T.installs, T.installsPrev)} goodWhenUp={true} />} />
+            <Kpi label="Installs (Google, first opens)" value={num(T.installs)} delta={<Delta pct={chg(T.installs, T.installsPrev)} goodWhenUp={true} />}
+              sub={T.installsBranch !== null ? `Branch counts ${num(T.installsBranch)} for matched campaigns` : undefined} />
             <Kpi label="Cost per install" value={cpi !== null ? inr(cpi) : '—'} delta={<Delta pct={chg(cpi, cpiPrev)} goodWhenUp={false} />} />
           </div>
           {branchNote && <p className="text-xs text-amber-800">{branchNote}</p>}
@@ -230,7 +231,10 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
                       <p>{num(c.allOrders)}</p>
                       {c.costPerOrder !== null && <p className="text-xs text-slate-500">{inr(c.costPerOrder)} each</p>}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{num(c.installs)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      <p>{num(c.installs)}</p>
+                      {c.installsBranch !== null && <p className="text-xs text-slate-500">Branch: {num(c.installsBranch)}</p>}
+                    </td>
                     <td className={`px-4 py-2.5 text-xs ${c.budgetLimited ? 'text-amber-800' : 'text-slate-600'}`}>{c.budget}</td>
                   </tr>
                 ))}
@@ -335,7 +339,7 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
         </section>
 
         <footer className="border-t border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
-          Data: the daily Google Ads script (read-only) for account {business.googleCustomerId}, plus Branch installs and first orders for Google campaigns, matched by campaign name.
+          Data: the daily Google Ads script (read-only) for account {business.googleCustomerId}, plus Branch installs and first orders for Google campaigns, matched by campaign name. Installs are Google’s first_open count (installed and opened), the same as the Installs column in Google Ads.
           Weeks end on the latest full day in the data. First orders use Branch when available, otherwise Google’s First_Order_Created_Fe.
           Budget-shift gains are estimates. Thresholds are starting values to tune after 2–3 weeks.
         </footer>
