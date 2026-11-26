@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/stark/cron", "schedule": "30 0 * * 1" }
+  ]
+}

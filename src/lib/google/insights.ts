@@ -29,7 +29,9 @@ export type CampaignRow = {
   invalidRate: number | null;
 };
 export type Alarm = { level: 'Critical' | 'Warning' | 'Watch'; title: string; detail: string; action: string };
-export type Action = { verb: 'Shift budget' | 'Cut' | 'Decide' | 'Refresh' | 'Fix'; title: string; detail: string; impact: string };
+// targets = the campaigns an action is about; metric = how its impact is measured a week later.
+export type ActionMetric = 'google_fo' | 'google_orders' | 'google_low_assets' | 'google_invalid';
+export type Action = { verb: 'Shift budget' | 'Cut' | 'Decide' | 'Refresh' | 'Fix'; title: string; detail: string; impact: string; targets: string[]; metric: ActionMetric };
 export type LowAsset = { kind: 'text' | 'image' | 'video'; field: string; content: string; size: string; where: string; impressions: number; conversions: number };
 
 export type GoogleInsights = {
@@ -85,6 +87,7 @@ const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const inr = (v: number) => '₹' + Math.round(v).toLocaleString('en-IN');
 const pct = (a: number | null, b: number | null) => (a === null || b === null || !b ? null : Math.round((a / b - 1) * 1000) / 10);
 const short = (c: string) => c.replace(/^sr_quick_/i, '');
+const andList = (xs: string[]) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
 
 function median(xs: number[]): number | null {
   if (!xs.length) return null;
@@ -93,12 +96,12 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-const isPartner = (a: string) => /quickpartner/i.test(a);
+export const isPartner = (a: string) => /quickpartner/i.test(a);
 // Installs = Firebase "first_open" (installed AND opened): the same number Google Ads shows in its Installs column,
 // and comparable with Branch. The Google Play "installs" action counts downloads, including never-opened ones.
-const isInstall = (a: string) => /(^|\s)first_open(\s|$)/i.test(a);
-const isFirstOrder = (a: string) => /first_order_created_fe(\s|$)/i.test(a) || /first_order_created_fe\s\d{4}-/i.test(a);
-const isAnyOrder = (a: string) => /(^|\s)order_created_fe(\s|$)/i.test(a) || /(^|\s)order_created_fe\s\d{4}-/i.test(a);
+export const isInstall = (a: string) => /(^|\s)first_open(\s|$)/i.test(a);
+export const isFirstOrder = (a: string) => /first_order_created_fe(\s|$)/i.test(a) || /first_order_created_fe\s\d{4}-/i.test(a);
+export const isAnyOrder = (a: string) => /(^|\s)order_created_fe(\s|$)/i.test(a) || /(^|\s)order_created_fe\s\d{4}-/i.test(a);
 
 function goalLabel(a: string): string {
   if (isFirstOrder(a)) return 'first orders';
@@ -109,14 +112,22 @@ function goalLabel(a: string): string {
   return a.replace(/\s\d{4}-\d\d-\d\dT[\d:.]+$/, '').replace(/^.*\)\s*/, '');
 }
 
-export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null, branchPrev: BranchCounts | null): GoogleInsights {
+// Weeks end lagDays before the latest day in the data, so late-reported conversions have settled.
+export const LAG_DAYS = 2;
+
+export function latestDay(tabs: Tabs): string {
+  return (tabs.campaigns_daily || []).reduce((m, r) => (day(r.date) > m ? day(r.date) : m), '');
+}
+
+export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null, branchPrev: BranchCounts | null, lagDays: number = LAG_DAYS): GoogleInsights {
   const camp = tabs.campaigns_daily || [];
   const conv = tabs.conversions_daily || [];
   const settings = tabs.campaign_settings || [];
   const R = RULES;
 
-  const end = camp.reduce((m, r) => (day(r.date) > m ? day(r.date) : m), '');
-  const endMs = toMs(end || ymd(Date.now() - DAY));
+  const latest = latestDay(tabs);
+  const endMs = toMs(latest || ymd(Date.now() - DAY)) - lagDays * DAY;
+  const end = ymd(endMs);
   const wStart = ymd(endMs - 6 * DAY), pStart = ymd(endMs - 13 * DAY), pEnd = ymd(endMs - 7 * DAY);
   const inW = (d: string) => d >= wStart && d <= end;
   const inP = (d: string) => d >= pStart && d <= pEnd;
@@ -227,7 +238,7 @@ export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null,
     if (r.ratio >= R.cutRatio) { r.verdict = 'Cut'; r.why = `${inr(r.costPerFirstOrder)} per first order: ${r.ratio}× the median${trend}.`; }
     else if (r.ratio >= R.watchRatio) { r.verdict = 'Watch'; r.why = `${inr(r.costPerFirstOrder)} per first order: ${r.ratio}× the median${trend}.`; }
     else if (r.ratio <= R.scaleRatio) { r.verdict = 'Scale'; r.why = `${inr(r.costPerFirstOrder)} per first order: ${r.ratio}× the median${trend}.`; }
-    else { r.verdict = 'Keep'; r.why = `${r.ratio}× the median${trend}.`; }
+    else { r.verdict = 'Keep'; r.why = `${inr(r.costPerFirstOrder)} per first order: ${r.ratio}× the median${trend}.`; }
   });
   const order: Verdict[] = ['Cut', 'Watch', 'Scale', 'Keep', 'Check'];
   rows.sort((x, y) => (x.kind === y.kind ? 0 : x.kind === 'install' ? -1 : 1) || order.indexOf(x.verdict) - order.indexOf(y.verdict) || y.spend - x.spend);
@@ -414,14 +425,14 @@ export function buildGoogleInsights(tabs: Tabs, branchThis: BranchCounts | null,
     const scaleCost = median(scale.map((r) => r.costPerFirstOrder as number)) as number;
     const costlyCost = median(costly.map((r) => r.costPerFirstOrder as number)) as number;
     const gain = Math.round(move / scaleCost - move / costlyCost);
-    actions.push({ verb: 'Shift budget', title: `Move ~${inr(move)} a week from ${costly.map((r) => short(r.name)).join(', ')} to ${scale.map((r) => short(r.name)).join(' and ')}`, detail: `They cost ${scale.map((r) => inr(r.costPerFirstOrder as number)).join(' and ')} per first order against ${costly.map((r) => inr(r.costPerFirstOrder as number)).join(', ')}. Raise in 20–30% steps so cost holds.`, impact: `Roughly ${gain >= 0 ? '+' : ''}${gain} first orders a week (estimate)` });
+    actions.push({ verb: 'Shift budget', title: `Move ~${inr(move)} a week from ${andList(costly.map((r) => short(r.name)))} to ${andList(scale.map((r) => short(r.name)))}`, detail: `They cost ${andList(scale.map((r) => inr(r.costPerFirstOrder as number)))} per first order against ${andList(costly.map((r) => inr(r.costPerFirstOrder as number)))}. Raise in 20–30% steps so cost holds.`, impact: `Roughly ${gain >= 0 ? '+' : ''}${gain} first orders a week (estimate)`, targets: costly.concat(scale).map((r) => r.name), metric: 'google_fo' });
   }
   const cuts = rows.filter((r) => r.verdict === 'Cut');
-  if (cuts.length) actions.push({ verb: 'Cut', title: `Pause or halve ${cuts.map((r) => short(r.name)).join(', ')}`, detail: cuts[0].why, impact: `Saves up to ${inr(cuts.reduce((t, r) => t + r.spend, 0))} a week` });
+  if (cuts.length) actions.push({ verb: 'Cut', title: `Pause or halve ${andList(cuts.map((r) => short(r.name)))}`, detail: cuts[0].why, impact: `Saves up to ${inr(cuts.reduce((t, r) => t + r.spend, 0))} a week`, targets: cuts.map((r) => r.name), metric: 'google_fo' });
   const allOrderCampaigns = rows.filter((r) => r.kind === 'engage' && /all orders/.test(r.bidsOn));
-  if (allOrderCampaigns.length) actions.push({ verb: 'Decide', title: `Set the goal for ${allOrderCampaigns.map((r) => short(r.name)).join(' and ')}`, detail: `They bid on all orders, including repeats (${allOrderCampaigns.map((r) => (r.costPerOrder !== null ? inr(r.costPerOrder) : '—') + ' per order').join(', ')}). If repeat orders are the goal, judge them on that; if not, switch their bidding event.`, impact: `${inr(allOrderCampaigns.reduce((t, r) => t + r.spend, 0))} a week judged on the right goal` });
-  if (lowTotal || flags.length) actions.push({ verb: 'Refresh', title: 'Replace Low assets and fill format gaps', detail: flags.map((f) => f.detail).join(' '), impact: 'More placements open to Google, especially YouTube Shorts and Discover' });
-  rows.filter((r) => r.invalidRate !== null && r.invalidRate >= R.invalidClickAlarm * 100).forEach((r) => actions.push({ verb: 'Fix', title: `Check ${short(r.name)}’s placements`, detail: `${r.invalidRate}% invalid clicks last week.`, impact: 'Cleaner traffic for the same budget' }));
+  if (allOrderCampaigns.length) actions.push({ verb: 'Decide', title: `Set the goal for ${andList(allOrderCampaigns.map((r) => short(r.name)))}`, detail: `They bid on all orders, including repeats (${andList(allOrderCampaigns.map((r) => (r.costPerOrder !== null ? inr(r.costPerOrder) : '—') + ' per order'))}). If repeat orders are the goal, judge them on that; if not, switch their bidding event.`, impact: `${inr(allOrderCampaigns.reduce((t, r) => t + r.spend, 0))} a week judged on the right goal`, targets: allOrderCampaigns.map((r) => r.name), metric: 'google_orders' });
+  if (lowTotal || flags.length) actions.push({ verb: 'Refresh', title: 'Replace Low assets and fill format gaps', detail: flags.map((f) => f.detail).join(' '), impact: 'More placements open to Google, especially YouTube Shorts and Discover', targets: [], metric: 'google_low_assets' });
+  rows.filter((r) => r.invalidRate !== null && r.invalidRate >= R.invalidClickAlarm * 100).forEach((r) => actions.push({ verb: 'Fix', title: `Check ${short(r.name)}’s placements`, detail: `${r.invalidRate}% invalid clicks last week.`, impact: 'Cleaner traffic for the same budget', targets: [r.name], metric: 'google_invalid' }));
 
   const rank = { Critical: 0, Warning: 1, Watch: 2 };
   alarms.sort((a, b) => rank[a.level] - rank[b.level]);

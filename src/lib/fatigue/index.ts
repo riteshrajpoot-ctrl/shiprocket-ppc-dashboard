@@ -18,6 +18,7 @@ export type FatigueReport = {
   resultActionUsed: string | null; // which Meta action type was counted as a result
   ads: AdFatigue[];
   days: DayTotal[]; // daily account totals, for week-on-week alarms
+  adDaily: Record<string, [string, number, number][]>; // per ad: [date, spend, results], for measuring action impact
 };
 
 const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -163,8 +164,11 @@ async function buildReport(key: BusinessKey): Promise<FatigueReport> {
     t.spend += r.spend; t.impressions += r.impressions; t.clicks += r.clicks; t.installs += r.installs;
   });
 
+  const adDaily: Record<string, [string, number, number][]> = {};
+  rows.forEach((r) => { if (r.spend > 0 || r.installs > 0) (adDaily[r.adId] = adDaily[r.adId] || []).push([r.date, Math.round(r.spend), r.installs]); });
+
   return {
-    business: key, windowStart, windowEnd, fetchedAt: new Date().toISOString(), resultActionUsed: used,
+    business: key, windowStart, windowEnd, fetchedAt: new Date().toISOString(), resultActionUsed: used, adDaily,
     ads: scoreAds(rows, info, frequency7, windowStart, windowEnd, b.result.costLong),
     days: Object.keys(totals).map((k) => totals[k]),
   };
@@ -172,8 +176,8 @@ async function buildReport(key: BusinessKey): Promise<FatigueReport> {
 
 // One cache per business, recalculated at most every 3 hours or when someone clicks Refresh.
 const cached: Record<BusinessKey, () => Promise<FatigueReport>> = {
-  lm: unstable_cache(() => buildReport('lm'), ['creative-fatigue-v3-lm'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] }),
-  quick: unstable_cache(() => buildReport('quick'), ['creative-fatigue-v3-quick'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] }),
+  lm: unstable_cache(() => buildReport('lm'), ['creative-fatigue-v4-lm'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] }),
+  quick: unstable_cache(() => buildReport('quick'), ['creative-fatigue-v4-quick'], { revalidate: 3 * 60 * 60, tags: ['creative-fatigue'] }),
 };
 export const getFatigueReport = (key: BusinessKey) => cached[key]();
 

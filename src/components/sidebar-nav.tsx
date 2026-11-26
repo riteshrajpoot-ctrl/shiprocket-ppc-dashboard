@@ -12,6 +12,7 @@ const STARK_ITEMS = [
       { label: 'Creative Fatigue', href: '/creative-fatigue', icon: '◐' },
       { label: 'Competitor View', href: '/competitors', icon: '◎' },
       { label: 'Google Keywords Gap & Wasted Spend', href: '/google-gap', icon: '◉', badge: 'New', badgeColor: '#9A3412', badgeBg: '#FFEDD5' },
+      { label: 'Tool Impact', href: '/tool-impact', icon: '◆', badge: 'New', badgeColor: '#065F46', badgeBg: '#D1FAE5' },
     ],
   },
 ]

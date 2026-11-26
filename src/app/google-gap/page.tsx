@@ -4,9 +4,11 @@ import { revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { currentBusiness } from '../../lib/stark/businesses';
 import StarkHeader from '../../components/stark-header';
-import { getGoogleSnapshot } from '../../lib/google';
-import { getBranchGoogle } from '../../lib/google/branch';
-import { buildGoogleInsights, RULES, type BranchCounts, type CampaignRow, type Verdict } from '../../lib/google/insights';
+import { RULES, type CampaignRow, type Verdict } from '../../lib/google/insights';
+import { loadGoogle } from '../../lib/stark/context';
+import { getStatuses, syncRecs, type StatusRow, type StoredRec } from '../../lib/stark/actions';
+import RecStatus from '../../components/rec-status';
+import LastWeek from '../../components/last-week';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -72,34 +74,29 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
     );
   }
 
-  let snap;
+  const h = headers();
+  const base = `${h.get('x-forwarded-proto') || 'https'}://${h.get('host')}`;
+  let load;
   try {
-    snap = await getGoogleSnapshot('quick');
+    load = await loadGoogle('quick', base);
   } catch (e) {
     return <Placeholder business={business} title="Couldn’t read the Google data">{(e as Error).message}</Placeholder>;
   }
-  if (!snap) {
+  if (!load) {
     return <Placeholder business={business} title="Waiting for the first data">The Google Ads script hasn’t sent anything yet. It runs daily between 5 and 6 AM, or run it once by hand in Google Ads.</Placeholder>;
   }
+  const { snap, ins, branchNote } = load;
 
-  // Weeks follow the latest day in the data: this week = last 7 days, prior week = the 7 before.
-  const end = (snap.tabs.campaigns_daily || []).reduce((m, r) => (String(r.date).slice(0, 10) > m ? String(r.date).slice(0, 10) : m), '');
-  const endMs = Date.parse(end + 'T00:00:00Z');
-  const d = (k: number) => new Date(endMs - k * 86400000).toISOString().slice(0, 10);
-
-  // Branch first orders for Google campaigns (via the existing Branch route). If Branch is slow or down, fall back to Google's count.
-  const h = headers();
-  const base = `${h.get('x-forwarded-proto') || 'https'}://${h.get('host')}`;
-  let bThis: BranchCounts | null = null, bPrev: BranchCounts | null = null, branchNote = '';
+  // Save this week's recommendations (first sighting keeps their "before" numbers) and load their statuses.
+  let stored: StoredRec[] = [];
+  let statuses: Record<string, StatusRow> = {};
+  let trackNote = '';
   try {
-    bThis = await getBranchGoogle(base, d(6), end);
-    bPrev = await getBranchGoogle(base, d(13), d(7));
+    stored = await syncRecs(business.key, load.recs, { google: load.ctx });
+    statuses = await getStatuses(stored.map((r) => r.id));
   } catch (e) {
-    bThis = null; bPrev = null;
-    branchNote = `Branch didn’t respond (${(e as Error).message}), so first orders below are Google’s count.`;
+    trackNote = `Action tracking is unavailable right now (${(e as Error).message}).`;
   }
-
-  const ins = buildGoogleInsights(snap.tabs, bThis, bPrev);
   const T = ins.totals;
   const tab = searchParams.t === 'install' || searchParams.t === 'engage' ? searchParams.t : 'all';
   const lowTab = searchParams.low === 'image' || searchParams.low === 'video' ? searchParams.low : 'text';
@@ -143,7 +140,10 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
             <Kpi label="Cost per install" value={cpi !== null ? inr(cpi) : '—'} delta={<Delta pct={chg(cpi, cpiPrev)} goodWhenUp={false} />} />
           </div>
           {branchNote && <p className="text-xs text-amber-800">{branchNote}</p>}
+          {trackNote && <p className="text-xs text-amber-800">{trackNote}</p>}
         </section>
+
+        <LastWeek business={business.key} page="google" ctx={{ google: load.ctx }} />
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="flex flex-col gap-3">
@@ -175,6 +175,11 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
                   </div>
                   <p className="text-sm text-slate-700">{r.detail}</p>
                   <p className="text-sm font-medium text-emerald-800">{r.impact}</p>
+                  {stored[i] && (
+                    <div className="mt-1">
+                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] ? { status: statuses[stored[i].id].status, by: statuses[stored[i].id].by, note: statuses[stored[i].id].note, updatedAt: statuses[stored[i].id].updatedAt } : null} />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -340,7 +345,7 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
 
         <footer className="border-t border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
           Data: the daily Google Ads script (read-only) for account {business.googleCustomerId}, plus Branch installs and first orders for Google campaigns, matched by campaign name. Installs are Google’s first_open count (installed and opened), the same as the Installs column in Google Ads.
-          Weeks end on the latest full day in the data. First orders use Branch when available, otherwise Google’s First_Order_Created_Fe.
+          Weeks end 2 days before the latest day in the data, so late-reported conversions have settled. First orders use Branch when available, otherwise Google’s First_Order_Created_Fe.
           Budget-shift gains are estimates. Thresholds are starting values to tune after 2–3 weeks.
         </footer>
       </main>

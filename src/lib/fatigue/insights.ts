@@ -6,7 +6,9 @@ export type DayTotal = { date: string; side: 'Supply' | 'Demand'; spend: number;
 export type Verdict = 'Cut' | 'Refresh' | 'Scale' | 'Watch' | 'Keep' | 'Learning' | 'Low delivery';
 export type AdVerdict = AdFatigue & { verdict: Verdict; why: string; peerMedianCpi: number | null; cpiVsMedian: number | null };
 export type Alarm = { level: 'Critical' | 'Warning' | 'Watch'; title: string; detail: string; action: string };
-export type Recommendation = { verb: 'Cut' | 'Shift budget' | 'Scale' | 'Refresh' | 'Launch' | 'Consolidate'; title: string; detail: string; impact: string };
+// targets = the ad IDs an action is about; metric = how its impact is measured a week later.
+export type RecMetric = 'meta_results' | 'meta_launch' | 'meta_low_delivery';
+export type Recommendation = { verb: 'Cut' | 'Shift budget' | 'Scale' | 'Refresh' | 'Launch' | 'Consolidate'; title: string; detail: string; impact: string; targets: string[]; metric: RecMetric };
 export type Week = { spend: number; installs: number; impressions: number; clicks: number; cpi: number | null; ctr: number | null };
 export type Insights = {
   ads: AdVerdict[];
@@ -191,7 +193,7 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
   const recs: Recommendation[] = [];
   const scaleMed = median(scale.filter((a) => a.cpi7 !== null).map((a) => a.cpi7 as number));
   if (cut.length) {
-    recs.push({ verb: 'Cut', title: `Pause ${cut.length} ad${cut.length > 1 ? 's' : ''}`, detail: listNames(cut, 5) + '.', impact: `Saves about ${inr(wasted7)} a week` });
+    recs.push({ verb: 'Cut', title: `Pause ${cut.length} ad${cut.length > 1 ? 's' : ''}`, detail: listNames(cut, 5) + '.', impact: `Saves about ${inr(wasted7)} a week`, targets: cut.map((a) => a.adId), metric: 'meta_results' });
   }
   if (cut.length && scale.length && scaleMed) {
     const cutInstalls = cut.reduce((s, a) => s + a.installs7, 0);
@@ -201,19 +203,21 @@ export function buildInsights(ads0: AdFatigue[], days: DayTotal[], windowEnd: st
       title: `Move the ${inr(wasted7)} to ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`,
       detail: `${listNames(scale)} cost a median ${inr(scaleMed)} per ${L.one}. Raise their budgets in steps of 20–30% so ${L.costShort} holds.`,
       impact: `Roughly ${gained - cutInstalls > 0 ? '+' : ''}${(gained - cutInstalls).toLocaleString('en-IN')} ${L.many} a week (estimate; ${L.costShort} usually rises a little as budget grows)`,
+      targets: cut.concat(scale).map((a) => a.adId),
+      metric: 'meta_results',
     });
   } else if (scale.length) {
-    recs.push({ verb: 'Scale', title: `Raise budget on ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`, detail: `${listNames(scale)}: ${L.costShort} well below peers and frequency still low.`, impact: `Add 20–30% budget, then re-check ${L.costShort} after 3 days` });
+    recs.push({ verb: 'Scale', title: `Raise budget on ${scale.length} winning ad${scale.length > 1 ? 's' : ''}`, detail: `${listNames(scale)}: ${L.costShort} well below peers and frequency still low.`, impact: `Add 20–30% budget, then re-check ${L.costShort} after 3 days`, targets: scale.map((a) => a.adId), metric: 'meta_results' });
   }
   const toRefresh = refresh.concat(tiring.filter((a) => a.verdict !== 'Refresh'));
   if (toRefresh.length) {
-    recs.push({ verb: 'Refresh', title: `Brief ${toRefresh.length} replacement creative${toRefresh.length > 1 ? 's' : ''}`, detail: listNames(toRefresh) + '. Keep the angle that worked; change the hook and first 3 seconds.', impact: 'Protects volume before CTR drops further' });
+    recs.push({ verb: 'Refresh', title: `Brief ${toRefresh.length} replacement creative${toRefresh.length > 1 ? 's' : ''}`, detail: listNames(toRefresh) + '. Keep the angle that worked; change the hook and first 3 seconds.', impact: 'Protects volume before CTR drops further', targets: toRefresh.map((a) => a.adId), metric: 'meta_results' });
   }
   if ((newest !== null && newest >= R.staleLaunchDays) || (top && totalSpend7 > 0 && top.spend7 / totalSpend7 >= R.concentrationShare)) {
-    recs.push({ verb: 'Launch', title: 'Launch 2–3 new creatives this week', detail: 'Test new angles from the Playbook alongside the current winner, not instead of it.', impact: 'Reduces dependence on one ad and refills the pipeline' });
+    recs.push({ verb: 'Launch', title: 'Launch 2–3 new creatives this week', detail: 'Test new angles from the Playbook alongside the current winner, not instead of it.', impact: 'Reduces dependence on one ad and refills the pipeline', targets: [], metric: 'meta_launch' });
   }
   if (low.length >= 3) {
-    recs.push({ verb: 'Consolidate', title: `Merge ${low.length} low-delivery ads`, detail: 'Keep the 2–3 strongest per ad set and pause the rest.', impact: 'Gives Meta enough data per ad to optimise' });
+    recs.push({ verb: 'Consolidate', title: `Merge ${low.length} low-delivery ads`, detail: 'Keep the 2–3 strongest per ad set and pause the rest.', impact: 'Gives Meta enough data per ad to optimise', targets: low.map((a) => a.adId), metric: 'meta_low_delivery' });
   }
 
   const n = alarms.filter((a) => a.level !== 'Watch').length;

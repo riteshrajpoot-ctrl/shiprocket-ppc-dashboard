@@ -2,11 +2,15 @@ import Link from 'next/link';
 import { revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
-  buildInsights, getFatigueReport, RULES, VERDICT_RULES, type ResultLabels,
+  RULES, VERDICT_RULES, type ResultLabels,
   type AdVerdict, type FatigueReport, type Verdict,
 } from '../../lib/fatigue';
 import { currentBusiness } from '../../lib/stark/businesses';
 import StarkHeader from '../../components/stark-header';
+import { loadFatigue, type FatigueLoad } from '../../lib/stark/context';
+import { getStatuses, syncRecs, type StatusRow, type StoredRec } from '../../lib/stark/actions';
+import RecStatus from '../../components/rec-status';
+import LastWeek from '../../components/last-week';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -113,9 +117,9 @@ function CreativeMap({ ads, labels }: { ads: AdVerdict[]; labels: ResultLabels }
 export default async function CreativeFatiguePage({ searchParams }: { searchParams: { v?: string; sort?: string; b?: string } }) {
   const business = currentBusiness(searchParams.b);
   const L: ResultLabels = business.result;
-  let data: FatigueReport;
+  let load: FatigueLoad;
   try {
-    data = await getFatigueReport(business.key);
+    load = await loadFatigue(business.key);
   } catch (e) {
     const msg = (e as Error).message;
     return (
@@ -137,7 +141,19 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
 
   const vf = VERDICTS.some((v) => v.key === searchParams.v) ? (searchParams.v as Verdict) : null;
   const sort = SORTS.some((s) => s.key === searchParams.sort) ? searchParams.sort! : 'urgent';
-  const ins = buildInsights(data.ads, data.days, data.windowEnd, L);
+  const data: FatigueReport = load.data;
+  const ins = load.ins;
+
+  // Save this week's recommendations (first sighting keeps their "before" numbers) and load their statuses.
+  let stored: StoredRec[] = [];
+  let statuses: Record<string, StatusRow> = {};
+  let trackNote = '';
+  try {
+    stored = await syncRecs(business.key, load.recs, { meta: load.ctx });
+    statuses = await getStatuses(stored.map((r) => r.id));
+  } catch (e) {
+    trackNote = `Action tracking is unavailable right now (${(e as Error).message}).`;
+  }
   const order = VERDICTS.map((v) => v.key);
   const age = (a: AdVerdict) => (a.ageDays === null ? -1 : a.ageDays);
   const list = ins.ads
@@ -202,6 +218,9 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
         </div>
       </section>
 
+      {trackNote && <p className="text-xs text-amber-800">{trackNote}</p>}
+      <LastWeek business={business.key} page="fatigue" ctx={{ meta: load.ctx }} />
+
       {/* Alarms */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Alarms</h2>
@@ -238,6 +257,11 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                   </div>
                   <p className="text-sm text-slate-700">{r.detail}</p>
                   <p className="text-sm font-medium text-emerald-800">{r.impact}</p>
+                  {stored[i] && (
+                    <div className="mt-1">
+                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] ? { status: statuses[stored[i].id].status, by: statuses[stored[i].id].by, note: statuses[stored[i].id].note, updatedAt: statuses[stored[i].id].updatedAt } : null} />
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
