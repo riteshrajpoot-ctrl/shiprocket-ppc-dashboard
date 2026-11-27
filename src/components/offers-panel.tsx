@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type Offer = {
   id?: number; business: string; claim: string; type: string; value: string; conditions: string;
@@ -21,6 +22,7 @@ export default function OffersPanel({ business, initial }: { business: string; i
   const [name, setName] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const router = useRouter(); // refreshes the rest of the page (e.g. the Suggest buttons) after the list changes
   const sheetRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
 
@@ -67,6 +69,7 @@ export default function OffersPanel({ business, initial }: { business: string; i
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Could not save');
       setOffers(json); setReview(null);
+      router.refresh();
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
 
@@ -76,7 +79,8 @@ export default function OffersPanel({ business, initial }: { business: string; i
     const next = offers.map((x) => (x.id === o.id ? { ...x, active: !x.active } : x));
     setOffers(next);
     const res = await fetch('/api/stark/offers/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: o.id, active: !o.active, by }) });
-    if (!res.ok) { setOffers(offers); setError('Could not change that offer'); }
+    if (!res.ok) { setOffers(offers); setError('Could not change that offer'); return; }
+    router.refresh();
   }
 
   const edit = (i: number, k: keyof Offer, v: string | boolean) => setReview((r) => (r ? r.map((o, j) => (j === i ? { ...o, [k]: v } : o)) : r));
