@@ -4,9 +4,10 @@ import StarkHeader from '../../components/stark-header';
 import RecStatus from '../../components/rec-status';
 import { loadFatigue, loadGoogle } from '../../lib/stark/context';
 import {
-  STATUS_LABEL, getStatuses, impactsFor, listRecs, previousWeek, weekStartOf,
+  STATUS_LABEL, getDismissed, getStatuses, impactsFor, listRecs, previousWeek, weekStartOf,
   type Impact, type MeasureCtx, type StoredRec,
 } from '../../lib/stark/actions';
+import { detectChanges, type DetectedChange } from '../../lib/stark/detect';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -37,10 +38,12 @@ export default async function ToolImpactPage({ searchParams }: { searchParams: {
   let recs: StoredRec[] = [];
   let statuses: Awaited<ReturnType<typeof getStatuses>> = {};
   let impacts: Record<string, Impact | null> = {};
+  let detected: Record<string, DetectedChange> = {};
   try {
     recs = await listRecs(business.key, from);
     statuses = await getStatuses(recs.map((r) => r.id));
     impacts = await impactsFor(recs, statuses, ctx);
+    detected = detectChanges(recs, statuses, ctx.google ? ctx.google.tabs : undefined, await getDismissed(recs.map((r) => r.id)));
   } catch (e) {
     notes.push(`Action tracking unavailable: ${(e as Error).message}`);
   }
@@ -78,6 +81,12 @@ export default async function ToolImpactPage({ searchParams }: { searchParams: {
     };
   });
 
+  // Needs your input: detected Google changes not yet confirmed, and last week's recommendations with no status.
+  const lastWeek = previousWeek(thisWeek);
+  const needsInput = recs.filter((r) => !statuses[r.id] && (detected[r.id] || r.weekStart === lastWeek));
+  const detectedCount = recs.filter((r) => detected[r.id]).length;
+  const unmarkedLast = recs.filter((r) => r.weekStart === lastWeek && !statuses[r.id]).length;
+
   const wins = acted.filter((r) => impacts[r.id] && impacts[r.id]!.due && impacts[r.id]!.good)
     .sort((a, b) => (impacts[b.id]!.saving || 0) - (impacts[a.id]!.saving || 0)).slice(0, 5);
   const missed = notDone.filter((r) => impacts[r.id] && impacts[r.id]!.due && impacts[r.id]!.good === false).slice(0, 5);
@@ -107,6 +116,26 @@ export default async function ToolImpactPage({ searchParams }: { searchParams: {
           </div>
         </section>
 
+        {needsInput.length > 0 && (
+          <section className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
+            <div>
+              <h2 className="text-lg font-semibold text-amber-950">Needs your input</h2>
+              <p className="text-sm text-amber-900">
+                {detectedCount > 0 && `${detectedCount} change${detectedCount > 1 ? 's' : ''} detected in Google, not yet confirmed. `}
+                {unmarkedLast > 0 && `${unmarkedLast} recommendation${unmarkedLast > 1 ? 's' : ''} from last week ${unmarkedLast > 1 ? 'have' : 'has'} no status. `}
+                Mark them so the impact counts.
+              </p>
+            </div>
+            {needsInput.map((r) => (
+              <article key={r.id} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-4">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span className="font-semibold text-slate-700">{PAGE[r.page]}</span>· {r.verb} · week of {day(r.weekStart)}</div>
+                <p className="font-semibold leading-snug">{r.title}</p>
+                <RecStatus id={r.id} initial={null} detected={detected[r.id] || null} />
+              </article>
+            ))}
+          </section>
+        )}
+
         <section className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4">
           <h2 className="text-lg font-semibold">Week by week</h2>
           {weekRows.map((w) => (
@@ -133,13 +162,13 @@ export default async function ToolImpactPage({ searchParams }: { searchParams: {
         <section className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">This week’s recommendations · week of {day(thisWeek)}</h2>
           {current.length === 0 && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">None saved yet this week. They appear once the Creative Fatigue and Google pages have been opened.</p>}
-          {current.map((r) => {
+          {current.filter((r) => needsInput.indexOf(r) < 0).map((r) => {
             const s = statuses[r.id];
             return (
               <article key={r.id} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span className="font-semibold text-slate-700">{PAGE[r.page]}</span>· {r.verb}</div>
                 <p className="font-semibold leading-snug">{r.title}</p>
-                <RecStatus id={r.id} initial={s ? { status: s.status, by: s.by, note: s.note, updatedAt: s.updatedAt } : null} />
+                <RecStatus id={r.id} initial={s || null} detected={detected[r.id] || null} />
               </article>
             );
           })}

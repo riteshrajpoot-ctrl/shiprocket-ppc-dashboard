@@ -44,7 +44,7 @@ export default async function LastWeek({ business, page, ctx }: { business: Busi
             <div className="flex min-w-0 flex-col gap-1">
               <p className="font-semibold leading-snug">{r.verb}: {r.title}</p>
               <span className={`self-start rounded-full px-2 py-0.5 text-xs font-semibold ${CHIP[key]}`}>{STATUS_LABEL[key]}</span>
-              <p className="text-xs text-slate-500">{s && key !== 'not' ? `${s.by} · ${when(s.updatedAt)}${s.note ? ` · “${s.note}”` : ''}` : 'No action recorded'}</p>
+              <p className="text-xs text-slate-500">{s && key !== 'not' ? `${s.by} · ${s.changedOn ? `changed ${day(s.changedOn)}` : when(s.updatedAt)}${s.note ? ` · “${s.note}”` : ''}` : 'No action recorded'}</p>
             </div>
             <p className="text-sm leading-relaxed text-slate-700">
               {key === 'skip' ? 'Marked not relevant, so not measured.' : m && m.due ? m.summary : `Measuring: ready on ${day(m ? m.readyOn : last)}.`}

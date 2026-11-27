@@ -11,7 +11,8 @@ export type RecMetricKind = 'google_fo' | 'google_orders' | 'google_low_assets' 
 export type RecInput = { page: RecPage; verb: string; title: string; detail: string; impactText: string; targets: string[]; metric: RecMetricKind };
 export type Measure = { spend?: number; results?: number; value?: number };
 export type StoredRec = RecInput & { id: string; business: BusinessKey; weekStart: string; baseline: Measure | null; createdAt: string };
-export type StatusRow = { recId: string; status: RecStatus; note: string; by: string; updatedAt: string };
+// changedOn = the day the change was really made (picked by the person, or taken from Google's change history).
+export type StatusRow = { recId: string; status: RecStatus; note: string; by: string; updatedAt: string; changedOn: string | null };
 export type Impact = {
   due: boolean; readyOn: string;
   before: Measure | null; after: Measure | null;
@@ -62,6 +63,9 @@ async function ensureTables(sql: any) {
     rec_id text PRIMARY KEY, status text NOT NULL, note text, by_name text, updated_at timestamptz NOT NULL DEFAULT now())`;
   await sql`CREATE TABLE IF NOT EXISTS stark_rec_results (
     rec_id text PRIMARY KEY, measured_at timestamptz NOT NULL DEFAULT now(), impact jsonb NOT NULL)`;
+  await sql`ALTER TABLE stark_rec_status ADD COLUMN IF NOT EXISTS changed_on text`;
+  await sql`CREATE TABLE IF NOT EXISTS stark_rec_dismissed (
+    rec_id text NOT NULL, change_key text NOT NULL, by_name text, at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (rec_id, change_key))`;
   ready = true;
 }
 
@@ -125,7 +129,7 @@ const RESULT_WORD: Record<string, string> = { google_fo: 'first orders', google_
 export function measure(rec: StoredRec, status: StatusRow | undefined, ctx: MeasureCtx): Impact | null {
   if (status && status.status === 'skip') return null;
   const acted = status && (status.status === 'done' || status.status === 'partly');
-  const a = acted ? istDay(Date.parse(status!.updatedAt)) : rec.weekStart;
+  const a = acted ? status!.changedOn || istDay(Date.parse(status!.updatedAt)) : rec.weekStart;
   const aMs = toMs(a);
   const afterEnd = ymd(aMs + 6 * DAY);
   const readyOn = ymd(aMs + 7 * DAY);
@@ -233,21 +237,49 @@ export async function getStatuses(ids: string[]): Promise<Record<string, StatusR
   await ensureTables(sql);
   const rows = (await sql`SELECT * FROM stark_rec_status WHERE rec_id = ANY(${ids})`) as any[];
   const out: Record<string, StatusRow> = {};
-  rows.forEach((r) => { out[r.rec_id] = { recId: r.rec_id, status: r.status, note: r.note || '', by: r.by_name || '', updatedAt: new Date(r.updated_at).toISOString() }; });
+  rows.forEach((r) => { out[r.rec_id] = toStatus(r); });
   return out;
 }
 
-export async function setStatus(id: string, status: RecStatus, note: string, by: string): Promise<StatusRow> {
+function toStatus(r: any): StatusRow {
+  return { recId: r.rec_id, status: r.status, note: r.note || '', by: r.by_name || '', updatedAt: new Date(r.updated_at).toISOString(), changedOn: r.changed_on || null };
+}
+
+export async function setStatus(id: string, status: RecStatus, note: string, by: string, changedOn: string | null): Promise<StatusRow> {
   const sql = db();
   await ensureTables(sql);
-  const exists = (await sql`SELECT id FROM stark_recs WHERE id = ${id}`) as any[];
+  const exists = (await sql`SELECT week_start FROM stark_recs WHERE id = ${id}`) as any[];
   if (!exists.length) throw new Error('Unknown recommendation');
-  const rows = (await sql`INSERT INTO stark_rec_status (rec_id, status, note, by_name, updated_at) VALUES (${id}, ${status}, ${note}, ${by}, now())
-    ON CONFLICT (rec_id) DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note, by_name = EXCLUDED.by_name, updated_at = now()
+  let changed: string | null = null;
+  if (status === 'done' || status === 'partly') {
+    const today = istDay(Date.now());
+    const earliest = ymd(toMs(exists[0].week_start) - 7 * DAY);
+    changed = changedOn && /^\d{4}-\d\d-\d\d$/.test(changedOn) ? changedOn : today;
+    if (changed > today) throw new Error('The change date can’t be in the future');
+    if (changed < earliest) throw new Error('The change date is too long before this recommendation');
+  }
+  const rows = (await sql`INSERT INTO stark_rec_status (rec_id, status, note, by_name, updated_at, changed_on) VALUES (${id}, ${status}, ${note}, ${by}, now(), ${changed})
+    ON CONFLICT (rec_id) DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note, by_name = EXCLUDED.by_name, updated_at = now(), changed_on = EXCLUDED.changed_on
     RETURNING *`) as any[];
-  await sql`DELETE FROM stark_rec_results WHERE rec_id = ${id}`; // re-measure from the new action date
-  const r = rows[0];
-  return { recId: r.rec_id, status: r.status, note: r.note || '', by: r.by_name || '', updatedAt: new Date(r.updated_at).toISOString() };
+  await sql`DELETE FROM stark_rec_results WHERE rec_id = ${id}`; // re-measure from the new change date
+  return toStatus(rows[0]);
+}
+
+// "No, that change wasn't for this recommendation": remember it so it isn't suggested again.
+export async function dismissChange(id: string, key: string, by: string): Promise<void> {
+  const sql = db();
+  await ensureTables(sql);
+  await sql`INSERT INTO stark_rec_dismissed (rec_id, change_key, by_name) VALUES (${id}, ${key}, ${by}) ON CONFLICT DO NOTHING`;
+}
+
+export async function getDismissed(ids: string[]): Promise<Record<string, string[]>> {
+  if (!ids.length) return {};
+  const sql = db();
+  await ensureTables(sql);
+  const rows = (await sql`SELECT rec_id, change_key FROM stark_rec_dismissed WHERE rec_id = ANY(${ids})`) as any[];
+  const out: Record<string, string[]> = {};
+  rows.forEach((r) => { (out[r.rec_id] = out[r.rec_id] || []).push(r.change_key); });
+  return out;
 }
 
 export async function getResults(ids: string[]): Promise<Record<string, Impact>> {

@@ -259,7 +259,7 @@ export default async function CreativeFatiguePage({ searchParams }: { searchPara
                   <p className="text-sm font-medium text-emerald-800">{r.impact}</p>
                   {stored[i] && (
                     <div className="mt-1">
-                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] ? { status: statuses[stored[i].id].status, by: statuses[stored[i].id].by, note: statuses[stored[i].id].note, updatedAt: statuses[stored[i].id].updatedAt } : null} />
+                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] || null} />
                     </div>
                   )}
                 </div>

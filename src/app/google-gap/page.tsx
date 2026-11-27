@@ -6,7 +6,8 @@ import { currentBusiness } from '../../lib/stark/businesses';
 import StarkHeader from '../../components/stark-header';
 import { RULES, type CampaignRow, type Verdict } from '../../lib/google/insights';
 import { loadGoogle } from '../../lib/stark/context';
-import { getStatuses, syncRecs, type StatusRow, type StoredRec } from '../../lib/stark/actions';
+import { getDismissed, getStatuses, syncRecs, type StatusRow, type StoredRec } from '../../lib/stark/actions';
+import { detectChanges, type DetectedChange } from '../../lib/stark/detect';
 import RecStatus from '../../components/rec-status';
 import LastWeek from '../../components/last-week';
 
@@ -90,10 +91,12 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
   // Save this week's recommendations (first sighting keeps their "before" numbers) and load their statuses.
   let stored: StoredRec[] = [];
   let statuses: Record<string, StatusRow> = {};
+  let detected: Record<string, DetectedChange> = {};
   let trackNote = '';
   try {
     stored = await syncRecs(business.key, load.recs, { google: load.ctx });
     statuses = await getStatuses(stored.map((r) => r.id));
+    detected = detectChanges(stored, statuses, snap.tabs, await getDismissed(stored.map((r) => r.id)));
   } catch (e) {
     trackNote = `Action tracking is unavailable right now (${(e as Error).message}).`;
   }
@@ -177,7 +180,7 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
                   <p className="text-sm font-medium text-emerald-800">{r.impact}</p>
                   {stored[i] && (
                     <div className="mt-1">
-                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] ? { status: statuses[stored[i].id].status, by: statuses[stored[i].id].by, note: statuses[stored[i].id].note, updatedAt: statuses[stored[i].id].updatedAt } : null} />
+                      <RecStatus id={stored[i].id} initial={statuses[stored[i].id] || null} detected={detected[stored[i].id] || null} />
                     </div>
                   )}
                 </div>
