@@ -305,6 +305,7 @@ export default async function GoogleGapPage({ searchParams }: { searchParams: { 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold">Low-rated assets to replace</h2>
+              <Link href="/google-gap/assets" className="mt-1 inline-block rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white">Rewrite Low text with Claude →</Link>
               <p className="text-xs text-slate-500">Most-shown first. {ins.assets.lowTotal} Low assets in total: {ins.assets.lowByKind.text} text, {ins.assets.lowByKind.image} images, {ins.assets.lowByKind.video} videos.</p>
             </div>
             <nav aria-label="Asset type" className="flex flex-wrap gap-1.5">

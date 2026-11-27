@@ -1,0 +1,7 @@
+﻿business,claim,type,value,conditions,valid_from,valid_until,channels,active,notes
+Quick,Local delivery from ₹45,Price,45,"2W, within city",2026-11-01,2026-12-31,All,yes,EXAMPLE: replace with your current offer
+Quick,3W delivery from ₹250,Price,250,"Delhi NCR, T&C apply",2026-11-01,,Google,yes,EXAMPLE
+Quick,20% off your first 3 shipments,Discount,20%,New users only,2026-11-01,2026-12-15,All,yes,EXAMPLE
+Quick,₹200 wallet cashback on first booking,Cashback,200,New users,2026-11-15,2026-12-31,All,yes,EXAMPLE: replaced 100% cashback
+Quick,Pickup in minutes,Speed,,Delhi NCR,,,All,yes,EXAMPLE: non-price claims are allowed too
+LM,"Ship to 24,000+ pincodes",Coverage,24000,India,,,All,no,EXAMPLE: set to yes once the number is confirmed
