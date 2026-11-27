@@ -5,6 +5,8 @@ import StarkHeader from '../../../components/stark-header';
 import OffersPanel from '../../../components/offers-panel';
 import RewritePanel from '../../../components/rewrite-panel';
 import RecStatus from '../../../components/rec-status';
+import ChangesLog from '../../../components/changes-log';
+import { listChanges, type AdChange } from '../../../lib/stark/changes';
 import { getGoogleSnapshot } from '../../../lib/google';
 import { listOffers, usableOffers, type Offer } from '../../../lib/stark/offers';
 import { listGroups, savedRewrites, type RewriteResult } from '../../../lib/stark/rewrite';
@@ -27,6 +29,8 @@ export default async function AssetRewritesPage({ searchParams }: { searchParams
   let groups: ReturnType<typeof listGroups> = [];
   try { offers = await listOffers(business.key); } catch (e) { notes.push(`Offers: ${(e as Error).message}`); }
   try { saved = await savedRewrites(business.key); } catch (e) { notes.push(`Saved suggestions: ${(e as Error).message}`); }
+  let changes: AdChange[] = [];
+  try { changes = await listChanges(business.key); } catch (e) { notes.push(`Change log: ${(e as Error).message}`); }
   try {
     const snap = await getGoogleSnapshot(business.key);
     if (snap) groups = listGroups(snap.tabs); else notes.push('No Google data yet.');
@@ -67,13 +71,14 @@ export default async function AssetRewritesPage({ searchParams }: { searchParams
 
         <RewritePanel business={business.key} groups={groups} saved={saved} offerNames={offerNames} hasOffers={usable.length > 0} />
 
+        <ChangesLog initial={changes} />
+
         <section className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-semibold">After you apply the new text</h2>
-          <ol className="list-decimal pl-5 text-sm leading-relaxed text-slate-700">
-            <li>Open the downloaded CSV. Each row has the campaign, ad group, the Low text and its replacement.</li>
-            <li>In Google Ads, open that ad group’s app ad, remove the Low asset and add the new text (or make the same change in Google Ads Editor).</li>
-            <li>Mark the recommendation below as done, with the date you changed it, so Tool Impact measures the result a week later.</li>
-          </ol>
+          <h2 className="text-lg font-semibold">After the changes are applied</h2>
+          <p className="text-sm leading-relaxed text-slate-700">
+            Mark the recommendation below as done, with the date the changes went live, so Tool Impact measures the result a week later.
+            Prefer to edit by hand? Use “Download picks (CSV)” and change the text in Google Ads yourself.
+          </p>
           {refresh ? (
             <div className="flex flex-col gap-2 rounded-md bg-slate-50 p-3">
               <p className="text-sm font-semibold">{refresh.verb}: {refresh.title}</p>
