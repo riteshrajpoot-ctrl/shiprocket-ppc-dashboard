@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 type Option = { text: string; why: string; offerIds: number[] };
 type Item = { assetId: string; field: 'Headline' | 'Description'; current: string; impressions: number; conversions: number; options: Option[]; removed: number };
@@ -26,23 +26,73 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
   const [loading, setLoading] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [picks, setPicks] = useState<Record<string, number>>({});
+  const [scope, setScope] = useState<'10' | '20' | 'all'>('10');
+  const [skipDone, setSkipDone] = useState(true);
+  const [batch, setBatch] = useState<{ total: number; done: number; failed: number; current: string[] } | null>(null);
+  const stopRef = useRef(false);
 
-  async function suggest(g: Group) {
+  // One ad group = one Claude call (kept under Vercel's 60-second limit per request).
+  async function fetchOne(g: Group): Promise<boolean> {
     const key = g.campaign + '|' + g.adGroup;
-    setLoading(key); setErrors((e) => ({ ...e, [key]: '' }));
+    setErrors((e) => ({ ...e, [key]: '' }));
     try {
       const res = await fetch('/api/stark/rewrite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b: business, campaign: g.campaign, adGroup: g.adGroup }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Claude could not suggest replacements');
       setResults((r) => ({ ...r, [key]: json }));
-      setOpen((o) => ({ ...o, [key]: true }));
       setPicks((p) => { const n = { ...p }; Object.keys(n).forEach((k) => { if (k.indexOf(key + '|') === 0) delete n[k]; }); return n; });
+      return true;
     } catch (e) {
       setErrors((x) => ({ ...x, [key]: (e as Error).message }));
-    } finally {
-      setLoading('');
+      return false;
     }
   }
+
+  async function suggest(g: Group) {
+    const key = g.campaign + '|' + g.adGroup;
+    setLoading(key);
+    if (await fetchOne(g)) setOpen((o) => ({ ...o, [key]: true }));
+    setLoading('');
+  }
+
+  // "Suggest for all": works through the busiest ad groups, two at a time, while the tab stays open.
+  async function suggestAll() {
+    const list = (scope === 'all' ? groups : groups.slice(0, Number(scope)))
+      .filter((g) => !(skipDone && results[g.campaign + '|' + g.adGroup]));
+    if (!list.length) return;
+    stopRef.current = false;
+    let next = 0, done = 0, failed = 0;
+    const running: string[] = [];
+    setBatch({ total: list.length, done: 0, failed: 0, current: [] });
+    const worker = async () => {
+      while (!stopRef.current && next < list.length) {
+        const g = list[next++];
+        const label = `${short(g.campaign)} › ${g.adGroup}`;
+        running.push(label);
+        setBatch({ total: list.length, done, failed, current: running.slice() });
+        const ok = await fetchOne(g);
+        running.splice(running.indexOf(label), 1);
+        if (ok) done++; else failed++;
+        setBatch({ total: list.length, done, failed, current: running.slice() });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setBatch((b) => (b ? { ...b, current: [] } : b));
+  }
+
+  // Convenience: pick the first suggestion for every Low asset that doesn't have a pick yet.
+  function pickFirstEverywhere() {
+    setPicks((p) => {
+      const n = { ...p };
+      Object.keys(results).forEach((gk) => results[gk].items.forEach((it) => {
+        const pk = gk + '|' + it.assetId;
+        if (n[pk] === undefined && it.options.length) n[pk] = 0;
+      }));
+      return n;
+    });
+  }
+
+  const running = !!batch && batch.current.length > 0;
 
   const picked = Object.keys(picks);
 
@@ -74,6 +124,39 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
         <button type="button" disabled={!picked.length} onClick={download}
           className="min-h-[38px] rounded-md bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-40">Download picks (CSV)</button>
       </div>
+      <div className="flex flex-col gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm font-semibold text-indigo-950">Suggest for several ad groups at once</p>
+          <label className="flex items-center gap-2 text-sm text-indigo-950">
+            Busiest
+            <select value={scope} onChange={(e) => setScope(e.target.value as '10' | '20' | 'all')} disabled={running} className="min-h-[32px] rounded-md border border-indigo-300 bg-white px-2 text-sm">
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="all">All {groups.length}</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-indigo-950">
+            <input type="checkbox" checked={skipDone} onChange={(e) => setSkipDone(e.target.checked)} disabled={running} />
+            Skip ad groups that already have suggestions
+          </label>
+          {running ? (
+            <button type="button" onClick={() => { stopRef.current = true; }} className="min-h-[36px] rounded-md border border-red-300 bg-white px-3 text-sm font-semibold text-red-700">Stop after current</button>
+          ) : (
+            <button type="button" disabled={!hasOffers || !!loading} onClick={suggestAll} className="min-h-[36px] rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">Suggest for all</button>
+          )}
+          <button type="button" disabled={!Object.keys(results).length} onClick={pickFirstEverywhere} className="min-h-[36px] rounded-md border border-indigo-300 bg-white px-3 text-sm font-semibold text-indigo-900 disabled:opacity-50">Pick the first option everywhere</button>
+        </div>
+        {batch && (
+          <div className="flex flex-col gap-1.5">
+            <div className="h-2 overflow-hidden rounded-full bg-indigo-100"><div className="h-2 bg-indigo-600 transition-all" style={{ width: `${((batch.done + batch.failed) / batch.total) * 100}%` }} /></div>
+            <p className="text-xs text-indigo-950">
+              {batch.done + batch.failed} of {batch.total} ad groups done{batch.failed ? ` · ${batch.failed} failed (see the red notes; try them again)` : ''}
+              {running ? ` · writing: ${batch.current.join(' and ')}. Keep this tab open.` : stopRef.current ? ' · stopped.' : ' · finished.'}
+            </p>
+          </div>
+        )}
+        <p className="text-xs text-indigo-900">Each ad group is one Claude call of about 15–30 seconds. Results appear below as they arrive; review them before downloading.</p>
+      </div>
       {!hasOffers && <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">Add your approved offers above first. Claude only writes prices and claims from that list.</p>}
 
       {groups.map((g) => {
@@ -87,9 +170,9 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
                 <p className="break-all font-semibold">{short(g.campaign)} › {g.adGroup}</p>
                 <p className="text-xs text-slate-500">{g.lowText} Low text asset{g.lowText > 1 ? 's' : ''} · {num(g.lowImpressions)} impressions · {g.strongText} Best/Good to learn from{r ? ` · suggested ${when(r.createdAt)}` : ''} · {isOpen ? 'hide' : 'show'}</p>
               </button>
-              <button type="button" disabled={!!loading || !hasOffers} onClick={() => suggest(g)}
+              <button type="button" disabled={!!loading || !hasOffers || running} onClick={() => suggest(g)}
                 className={`min-h-[36px] rounded-md px-3 text-sm font-semibold disabled:opacity-50 ${r ? 'border border-slate-300 bg-white' : 'bg-indigo-600 text-white'}`}>
-                {loading === key ? 'Claude is writing…' : r ? 'Suggest again' : 'Suggest replacements'}
+                {loading === key || (batch && batch.current.indexOf(`${short(g.campaign)} › ${g.adGroup}`) >= 0) ? 'Claude is writing…' : r ? 'Suggest again' : 'Suggest replacements'}
               </button>
             </div>
             {errors[key] && <p className="text-sm text-red-700">{errors[key]}</p>}
