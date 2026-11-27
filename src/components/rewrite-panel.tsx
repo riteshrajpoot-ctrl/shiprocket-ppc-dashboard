@@ -126,7 +126,7 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
       const res = await fetch('/api/stark/changes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b: business, by, changes: pickedRows() }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Could not queue the changes');
-      setApplyMsg(`${json.length} change${json.length === 1 ? '' : 's'} sent. The “STARK apply” script logs them to the sheet and applies them at its next run (hourly), or click Run on it in Google Ads to do it now.`);
+      setApplyMsg(`${json.length} change${json.length === 1 ? '' : 's'} proposed. At its next run (hourly, or click Run in Google Ads) the “STARK apply” script adds them to the sheet tab “Approvals”. Type Yes in the Approve column to apply each one.`);
       setConfirming(false);
       setPicks({});
       router.refresh();
@@ -166,13 +166,13 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
           <button type="button" disabled={!picked.length} onClick={download}
             className="min-h-[38px] rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold disabled:opacity-40">Download picks (CSV)</button>
           <button type="button" disabled={!picked.length || applying} onClick={() => setConfirming(true)}
-            className="min-h-[38px] rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Apply {picked.length || ''} to Google Ads</button>
+            className="min-h-[38px] rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Send {picked.length || ''} for approval</button>
         </div>
       </div>
       {applyMsg && <p className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">{applyMsg}</p>}
       {confirming && (
         <div className="flex flex-col gap-3 rounded-lg border-2 border-emerald-500 bg-white p-4">
-          <p className="font-semibold">Apply these {picked.length} changes to Google Ads?</p>
+          <p className="font-semibold">Send these {picked.length} changes for approval?</p>
           <div className="max-h-80 overflow-auto rounded-md border border-slate-200">
             <table className="w-full min-w-[720px] table-fixed text-xs">
               <thead className="bg-slate-50 text-left text-slate-500"><tr><th className="w-[30%] p-2 font-medium">Ad group</th><th className="w-[10%] p-2 font-medium">Field</th><th className="w-[30%] p-2 font-medium">Old (Low)</th><th className="w-[30%] p-2 font-medium">New</th></tr></thead>
@@ -186,10 +186,10 @@ export default function RewritePanel({ business, groups, saved, offerNames, hasO
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-600">The script writes each change to the sheet tab “Changes” (old and new text), swaps only these lines in the app ads, and skips any whose old text is no longer live. Applied changes can be undone from the change log below.</p>
+          <p className="text-xs text-slate-600">Nothing changes in Google Ads yet. The “STARK apply” script copies these into the sheet tab “Approvals” (old and new text). Each one is applied only after someone types Yes in its Approve cell; No rejects it.</p>
           {applyErr && <p className="text-sm text-red-700">{applyErr}</p>}
           <div className="flex gap-2">
-            <button type="button" disabled={applying} onClick={applyToGoogle} className="min-h-[38px] rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{applying ? 'Sending…' : 'Yes, apply'}</button>
+            <button type="button" disabled={applying} onClick={applyToGoogle} className="min-h-[38px] rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{applying ? 'Sending…' : 'Yes, send for approval'}</button>
             <button type="button" onClick={() => setConfirming(false)} className="min-h-[38px] rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold">Cancel</button>
           </div>
         </div>

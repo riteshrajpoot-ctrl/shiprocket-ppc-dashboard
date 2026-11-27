@@ -1,9 +1,11 @@
-// Ad-copy changes queued from STARK and applied by the "STARK apply" Google Ads script.
-// STARK only queues; the script (inside Google) logs each change to the sheet, applies it and reports back.
+// Ad-copy changes proposed from STARK and applied by the "STARK apply" Google Ads script.
+// STARK can only propose. The script copies proposals into the sheet tab "Approvals"; a change is applied
+// only after someone types Yes in the sheet (limited to Shiprocket accounts). Results are reported back here.
 import { neon } from '@neondatabase/serverless';
 import type { BusinessKey } from './businesses';
 
-export type ChangeStatus = 'queued' | 'preview' | 'applied' | 'skipped' | 'error';
+// queued = proposed in STARK · awaiting = in the sheet, waiting for Yes/No · then applied / rejected / skipped / error
+export type ChangeStatus = 'queued' | 'awaiting' | 'preview' | 'applied' | 'rejected' | 'skipped' | 'error';
 export type AdChange = {
   id: number; business: BusinessKey; campaign: string; adGroup: string; field: 'Headline' | 'Description';
   oldText: string; newText: string; pickedBy: string; createdAt: string; status: ChangeStatus;
@@ -44,7 +46,7 @@ export async function queueChanges(business: BusinessKey, changes: ChangeInput[]
     if (newText.length > LIMIT[field]) throw new Error(`“${newText}” is over the ${LIMIT[field]}-character limit`);
     // A change already waiting for the same text isn't queued twice.
     const dup = (await sql`SELECT id FROM stark_ad_changes WHERE business = ${business} AND campaign = ${c.campaign} AND ad_group = ${c.adGroup}
-      AND old_text = ${oldText} AND status IN ('queued', 'preview')`) as any[];
+      AND old_text = ${oldText} AND status IN ('queued', 'awaiting', 'preview')`) as any[];
     if (dup.length) continue;
     const rows = (await sql`INSERT INTO stark_ad_changes (business, campaign, ad_group, field, old_text, new_text, picked_by)
       VALUES (${business}, ${c.campaign}, ${c.adGroup}, ${field}, ${oldText}, ${newText}, ${by}) RETURNING *`) as any[];
@@ -59,8 +61,8 @@ export async function listChanges(business: BusinessKey, limit = 100): Promise<A
   return ((await sql`SELECT * FROM stark_ad_changes WHERE business = ${business} ORDER BY id DESC LIMIT ${limit}`) as any[]).map(toChange);
 }
 
-// For the script: changes still to do (preview ones are retried, so they go live once preview mode is switched off).
-export async function pendingChanges(business: BusinessKey, max = 20): Promise<AdChange[]> {
+// For the script: new proposals to copy into the sheet for approval.
+export async function pendingChanges(business: BusinessKey, max = 50): Promise<AdChange[]> {
   const sql = db();
   await ensure(sql);
   return ((await sql`SELECT * FROM stark_ad_changes WHERE business = ${business} AND status IN ('queued', 'preview') ORDER BY id LIMIT ${max}`) as any[]).map(toChange);
@@ -71,7 +73,7 @@ export async function recordResults(business: BusinessKey, results: { id: number
   await ensure(sql);
   let n = 0;
   for (const r of results) {
-    const status = ['preview', 'applied', 'skipped', 'error'].indexOf(r.status) >= 0 ? r.status : 'error';
+    const status = ['awaiting', 'preview', 'applied', 'rejected', 'skipped', 'error'].indexOf(r.status) >= 0 ? r.status : 'error';
     const msg = String(r.message || '').slice(0, 500);
     await sql`UPDATE stark_ad_changes SET status = ${status}, message = ${msg}, applied_at = ${status === 'applied' ? new Date().toISOString() : null}
       WHERE id = ${Number(r.id)} AND business = ${business}`;
@@ -93,9 +95,10 @@ export async function undoChange(id: number, by: string): Promise<AdChange> {
   return toChange(ins[0]);
 }
 
-// Cancel a change that hasn't been applied yet.
+// Withdraw a proposal that hasn't reached the sheet yet, or clear a finished-but-unapplied one.
+// Once a change is in the sheet, it's decided there (type No to reject it).
 export async function cancelChange(id: number): Promise<void> {
   const sql = db();
   await ensure(sql);
-  await sql`DELETE FROM stark_ad_changes WHERE id = ${id} AND status IN ('queued', 'preview', 'error', 'skipped')`;
+  await sql`DELETE FROM stark_ad_changes WHERE id = ${id} AND status IN ('queued', 'preview', 'error', 'skipped', 'rejected')`;
 }

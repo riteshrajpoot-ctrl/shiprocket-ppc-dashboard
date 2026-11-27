@@ -5,13 +5,16 @@ import { useRouter } from 'next/navigation';
 
 type Change = {
   id: number; campaign: string; adGroup: string; field: string; oldText: string; newText: string; pickedBy: string;
-  createdAt: string; status: 'queued' | 'preview' | 'applied' | 'skipped' | 'error'; message: string; appliedAt: string | null; undoOf: number | null;
+  createdAt: string; status: 'queued' | 'awaiting' | 'preview' | 'applied' | 'rejected' | 'skipped' | 'error'; message: string; appliedAt: string | null; undoOf: number | null;
 };
 const CHIP: Record<string, string> = {
-  queued: 'bg-sky-100 text-sky-900', preview: 'bg-violet-100 text-violet-800', applied: 'bg-emerald-100 text-emerald-800',
-  skipped: 'bg-slate-100 text-slate-700', error: 'bg-red-100 text-red-800',
+  queued: 'bg-sky-100 text-sky-900', awaiting: 'bg-amber-100 text-amber-900', preview: 'bg-violet-100 text-violet-800',
+  applied: 'bg-emerald-100 text-emerald-800', rejected: 'bg-slate-200 text-slate-700', skipped: 'bg-slate-100 text-slate-700', error: 'bg-red-100 text-red-800',
 };
-const LABEL: Record<string, string> = { queued: 'Waiting for script', preview: 'Preview logged', applied: 'Applied', skipped: 'Skipped', error: 'Error' };
+const LABEL: Record<string, string> = {
+  queued: 'Proposed · not in sheet yet', awaiting: 'In sheet · waiting for approval', preview: 'Proposed · not in sheet yet',
+  applied: 'Approved and applied', rejected: 'Rejected in sheet', skipped: 'Skipped', error: 'Error',
+};
 const short = (c: string) => c.replace(/^sr_quick_/i, '');
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '');
 
@@ -40,7 +43,10 @@ export default function ChangesLog({ initial }: { initial: Change[] }) {
     <section className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4">
       <div>
         <h2 className="text-lg font-semibold">Change log</h2>
-        <p className="text-sm text-slate-600">Ad-copy changes sent to Google Ads from STARK. The same record, with old and new text, is in the sheet tab “Changes”.</p>
+        <p className="text-sm text-slate-600">
+          STARK only proposes changes. The “STARK apply” script copies them into the sheet tab “Approvals”; a change goes live only after someone types
+          <b> Yes</b> in its Approve cell (or <b>No</b> to reject it).
+        </p>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="overflow-x-auto">
@@ -66,7 +72,8 @@ export default function ChangesLog({ initial }: { initial: Change[] }) {
                 </td>
                 <td className="px-2 py-2 text-xs">
                   {c.status === 'applied' && <button type="button" disabled={!!busy} onClick={() => act('undo', c.id)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold disabled:opacity-50">Undo</button>}
-                  {(c.status === 'queued' || c.status === 'preview' || c.status === 'error' || c.status === 'skipped') && <button type="button" disabled={!!busy} onClick={() => act('cancel', c.id)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold disabled:opacity-50">{c.status === 'queued' || c.status === 'preview' ? 'Cancel' : 'Remove'}</button>}
+                  {(c.status === 'queued' || c.status === 'preview' || c.status === 'error' || c.status === 'skipped' || c.status === 'rejected') && <button type="button" disabled={!!busy} onClick={() => act('cancel', c.id)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold disabled:opacity-50">{c.status === 'queued' || c.status === 'preview' ? 'Withdraw' : 'Remove'}</button>}
+                  {c.status === 'awaiting' && <span className="text-slate-500">Decide in the sheet</span>}
                 </td>
               </tr>
             ))}
